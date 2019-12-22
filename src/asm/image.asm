@@ -20,6 +20,7 @@ rgb2grayscale:
 
     mov     rax, rdi
 
+    push    rbx                             ; Preserve rbx
     mov     rbx, rsi                        ; Total number of pixels
     imul    rbx, rdx
 .loop:
@@ -46,6 +47,7 @@ rgb2grayscale:
     cmp     rcx, rbx
     jl      .loop
 
+    pop     rbx
     pop     rcx
     mov     dword [rcx], 1                  ; Set number of channels to 1
 
