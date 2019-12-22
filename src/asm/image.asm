@@ -11,6 +11,7 @@ section .text
 rgb2grayscale:
     push    rbp
     mov     rbp, rsp
+    sub     rsp, 8                          ; Allocate local storage
 
     push    rcx                             ; rcx used in loop
     xor     rcx, rcx
@@ -23,8 +24,8 @@ rgb2grayscale:
     push    rbx
 
     mov     rbx, rcx                        ; Calculate byte offset (iter_num * 3)
-    mov     qword [rbp - 24], 3
-    imul    rbx, qword [rbp - 24]
+    mov     qword [rbp - 8], 3
+    imul    rbx, qword [rbp - 8]
     
     mov     dil, byte [rax + rbx]           ; Setup call to mean3
     mov     sil, byte [rax + rbx + 1]
