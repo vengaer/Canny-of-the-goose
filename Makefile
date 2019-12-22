@@ -11,6 +11,7 @@ ASMSRC_EXT   := asm
 OBJ_EXT      := o
 CFLAGS       := -std=c11 -Wall -Wextra -pedantic -Wshadow -Wunknown-pragmas
 ASMFLAGS     := -felf64
+LDFLAGS      := -no-pie
 LIB          := -lm
 INC          := $(shell [ -z "${INC_DIRS}" ] || echo "${INC_DIRS}" | sed -E 's/( |^)([^ ]*)/-I \2 /g')
 
@@ -24,7 +25,7 @@ all: $(TARGET)
 
 $(TARGET): $(COBJ) $(ASMOBJ)
 	$(info Linking $@)
-	@$(CC) -o $@ $^ $(LIB)
+	@$(CC) -o $@ $^ $(LIB) $(LDFLAGS)
 
 $(BUILD_DIR)/%.$(OBJ_EXT): $(SRC_DIR)/%.$(CSRC_EXT) | dirs
 	$(info Compiling $@)
