@@ -6,6 +6,8 @@ section .text
 ; Params:
 ;     xmm0: y
 ;     xmm1: x
+; Return:
+;     xmm0: result of the computation
 arctan2:
     push    rbp
     mov     rbp, rsp

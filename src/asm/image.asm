@@ -4,10 +4,12 @@ section .text
 
 ; Convert rgb image to grayscale
 ; Params: 
-;     rdi: byte ptr to data
+;     rdi: byte ptr to data, overwritten with output
 ;     rsi: width of image (in pixels)
 ;     rdx: height of image (in pixels)
 ;     rcx: dword pointer to number of channels
+; Return:
+;     -
 rgb2grayscale:
     push    rbp
     mov     rbp, rsp
@@ -56,6 +58,8 @@ rgb2grayscale:
 ;     dil: word 1
 ;     sil: word 2
 ;     dl:  word 3
+; Return:
+;     al: mean of the inputs
 mean3:
     push    rbp
     mov     rbp, rsp
