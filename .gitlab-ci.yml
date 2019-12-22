@@ -1,0 +1,13 @@
+image: archlinux/base:latest
+
+before_script:
+    - pacman --noconfirm --needed -Syu gcc nasm make
+
+stages:
+    - build
+
+gcc:
+    stage: build
+    script:
+    - export CC=gcc
+    - make
