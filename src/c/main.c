@@ -9,7 +9,7 @@
 #include <argp.h>
 #include <unistd.h>
 
-#define DEFAULT_OUTFILE "cotg_out.png"
+#define DEFAULT_OUTFILE "data/cotg_out.png"
 
 char const *argp_program_version = "canny-of-the-goose 1.0";
 char const *argp_program_bug_address = "<vilhelm.engstrom@tuta.io>";
@@ -61,14 +61,18 @@ int main(int argc, char **argv) {
     }
     int width, height, channels;
     unsigned char *texdata = NULL;
+    printf("Reading infile %s\n", args.infile);
     texdata = stbi_load(args.infile, &width, &height, &channels, 0);
     if(!texdata) {
         fputs("Failed to load image\n", stderr);
         return 1;
     }
 
-    printf("%d: %d\n", height, rgb2grayscale(texdata, width, height, &channels));
-    printf("%d\n", channels);
+    rgb2grayscale(texdata, width, height, &channels);
+
+    printf("Writing outfile %s\n", args.outfile);
+    stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
+    stbi_image_free(texdata);
 
 	return 0;
 }

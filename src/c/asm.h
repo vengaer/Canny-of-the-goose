@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-extern int32_t rgb2grayscale(unsigned char *data, int32_t width, int32_t height, int32_t *channels);
+extern void rgb2grayscale(unsigned char *data, int64_t width, int64_t height, int32_t *channels);
 
 #endif
