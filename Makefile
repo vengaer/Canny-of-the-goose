@@ -43,7 +43,8 @@ run: $(TARGET)
 	@./$(TARGET)
 
 clean:
-	rm -f $(OBJ) $(TARGET); rm -rf $(BUILD_DIR)
+	$(info Cleaning $(TARGET))
+	@rm -f $(OBJ) $(TARGET); rm -rf $(BUILD_DIR)
 
 dirs:
 	@mkdir -p $(BUILD_DIR)
