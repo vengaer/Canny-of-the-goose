@@ -12,7 +12,7 @@
 rgb2grayscale:
     push    rbp
     mov     rbp, rsp
-    sub     rsp, 8                          ; Allocate local storage
+    sub     rsp, 16                         ; Reserve local storage
 
     push    rcx                             ; rcx used in loop
     xor     ecx, ecx
