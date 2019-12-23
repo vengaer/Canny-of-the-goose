@@ -10,6 +10,7 @@
 ; Return:
 ;     -
 rgb2grayscale:
+.m  equ     8
     push    rbp
     mov     rbp, rsp
     sub     rsp, 16                         ; Reserve local storage
@@ -26,8 +27,8 @@ rgb2grayscale:
     push    rbx
 
     mov     rbx, rcx                        ; Calculate byte offset (iter_num * 3)
-    mov     qword [rbp - 8], 3
-    imul    rbx, qword [rbp - 8]
+    mov     qword [rsp + .m], 3
+    imul    rbx, qword [rsp + .m]
     
     mov     dil, byte [rax + rbx]           ; Setup call to mean3
     mov     sil, byte [rax + rbx + 1]
