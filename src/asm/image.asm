@@ -55,11 +55,11 @@ rgb2grayscale:
     pop     rbp
     ret
 
-; Compute the mean of 3 words
+; Compute the mean of 3 bytes
 ; Params:
-;     dil: word 1
-;     sil: word 2
-;     dl:  word 3
+;     dil: byte 1
+;     sil: byte 2
+;     dl:  byte 3
 ; Return:
 ;     al: mean of the inputs
 mean3:
