@@ -15,16 +15,16 @@ arctan2:
     push    rbp
     mov     rbp, rsp
     sub     rsp, 16                         ; Local storage
-    fninit                                  ; Initialize fp unit
 
     movsd   qword [rsp + .y], xmm0
     movsd   qword [rsp + .x], xmm1
 
-    fld     qword [rsp + .y]                 ; Push to fp stack
+    fld     qword [rsp + .y]                ; Push to fp stack
+    fst     st1                             ; Copy st0 to st1
     fld     qword [rsp + .x]
 
-    fpatan                                  ; atan(st(1) / st(0)), pop
-    fstp    qword [rsp + .x]                ; Store result on stack
+    fpatan                                  ; atan(st1 / st0), pop
+    fstp    qword [rsp + .x]                ; Pop result to stack
     movsd   xmm0, qword [rsp + .x]
 
     mov     rsp, rbp
