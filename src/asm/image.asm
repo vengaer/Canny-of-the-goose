@@ -1,6 +1,5 @@
-global rgb2grayscale
-
-section .text
+    section .text
+    global rgb2grayscale
 
 ; Convert rgb image to grayscale
 ; Params: 

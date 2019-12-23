@@ -1,8 +1,7 @@
-global arctan2
-global imax
-global imin
-
-section .text
+    section .text
+    global arctan2
+    global imax
+    global imin
 
 ; Compute arctan(y/x)
 ; Params:
