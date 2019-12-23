@@ -15,7 +15,7 @@ rgb2grayscale:
     sub     rsp, 8                          ; Allocate local storage
 
     push    rcx                             ; rcx used in loop
-    xor     rcx, rcx
+    xor     ecx, ecx
 
     mov     rax, rdi
 
@@ -71,7 +71,7 @@ mean3:
     mov     ax, di          ; Compute mean
     add     ax, si
     add     ax, dx
-    xor     rdx, rdx
+    xor     edx, edx
     mov     di, 3
     div     di
 
