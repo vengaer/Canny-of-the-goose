@@ -10,20 +10,22 @@
 ; Return:
 ;     xmm0: result of the computation
 arctan2:
+.y  equ     8
+.x  equ     0
     push    rbp
     mov     rbp, rsp
     sub     rsp, 16                         ; Local storage
     fninit                                  ; Initialize fp unit
 
-    movlps  qword [rbp - 8], xmm0
-    movlps  qword [rbp - 16], xmm1
+    movsd   qword [rsp + .y], xmm0
+    movsd   qword [rsp + .x], xmm1
 
-    fld     qword [rbp - 8]                 ; Push to stack
-    fld     qword [rbp - 16]
+    fld     qword [rsp + .y]                 ; Push to stack
+    fld     qword [rsp + .x]
 
     fpatan                                  ; atan(st(1) / st(0)), pop
-    fstp    qword [rbp - 16]                ; Store result on stack
-    movlps  xmm0, qword [rbp - 16]
+    fstp    qword [rsp + .x]                ; Store result on stack
+    movlps  xmm0, qword [rsp + .x]
 
     mov     rsp, rbp
     pop     rbp
