@@ -5,8 +5,8 @@ section .text
 ; Convert rgb image to grayscale
 ; Params: 
 ;     rdi: byte ptr to data, overwritten with output
-;     rsi: width of image (in pixels)
-;     rdx: height of image (in pixels)
+;     esi: width of image (in pixels)
+;     edx: height of image (in pixels)
 ;     rcx: dword pointer to number of channels
 ; Return:
 ;     -
@@ -65,7 +65,7 @@ rgb2grayscale:
 mean3:
     push    rbp
     mov     rbp, rsp
-    movzx   di, dil         ; Sign extend (8-bit => 16-bit)
+    movzx   di, dil         ; Zero extend (8-bit => 16-bit)
     movzx   si, sil
     movzx   dx, dl
 
