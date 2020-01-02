@@ -13,7 +13,7 @@ CFLAGS       := -std=c11 -Wall -Wextra -pedantic -Wshadow -Wunknown-pragmas
 ASMFLAGS     := -felf64
 LDFLAGS      := -no-pie
 LIB          := -lm
-INC          := $(shell [ -z "${INC_DIRS}" ] || echo "${INC_DIRS}" | sed -E 's/( |^)([^ ]*)/-I \2 /g')
+INC          := $(foreach d, $(INC_DIRS), -I$d)
 
 CSRC         := $(shell find $(SRC_DIR) -mindepth 1 -type f -name *.$(CSRC_EXT))
 ASMSRC		 := $(shell find $(SRC_DIR) -mindepth 1 -type f -name *.$(ASMSRC_EXT))
