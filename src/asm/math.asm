@@ -38,15 +38,10 @@ arctan2:
 ; Return:
 ;     rax: max(x,y)
 imax:
-    push    rbp
-    mov     rbp, rsp
-
     mov     rax, rdi
     cmp     rax, rsi
     cmovl   rax, rsi
 
-    mov     rsp, rbp
-    pop     rbp
     ret
 
 ; Compute min of two signed integers
@@ -56,13 +51,8 @@ imax:
 ; Return:
 ;     rax: min(x,y)
 imin:
-    push    rbp
-    mov     rbp, rsp
-
     mov     rax, rdi
     cmp     rsi, rax
     cmovl   rax, rsi
 
-    mov     rsp, rbp
-    pop     rbp
     ret
