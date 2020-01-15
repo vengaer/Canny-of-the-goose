@@ -106,12 +106,13 @@ gblur:
 ; Horizontal pass
     mov     rdi, qword [rsp + .dta]         ; Move data back to rdi
 
-    xor     ecx, ecx
+    xor     ecx, ecx                        ; ecx counter for outer loop
     push    rbx                             ; ebx for upper bound in column loop
     mov     ebx, esi
     sub     ebx, 2                          ; Avoid out-of-bounds access for filter (edges handled separately)
 
 .hloop:                                     ; Loop over rows
+
     mov     eax, 2                          ; eax counter for inner loop
 
 .hinner_loop:                               ; Loop over cols 2,...,width - 3 (inclusive)
@@ -181,9 +182,10 @@ gblur:
 ;     rdi: byte pointer to data (at least 4 bytes)
 ; Return:
 ;     xmm0 (packed single precision): zero extended data converted to packed single precision float
-; Prerequisites:
-;     rsp 16-byte aligned
 bytes2ps:
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -0x10
     sub     rsp, 16
     xor     ecx, ecx
     mov     edx, 4
@@ -201,7 +203,8 @@ bytes2ps:
 
     movaps  xmm0, [rsp]
 
-    add     rsp, 16
+    mov     rsp, rbp
+    pop     rbp
     ret
 
 ; Convert single byte to scalar single precision floating point
