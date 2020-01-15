@@ -1,5 +1,5 @@
 CC           ?= gcc
-ASMC	     := nasm
+ASMBLR	     := nasm
 
 TARGET       := cotg
 
@@ -33,9 +33,9 @@ $(BUILD_DIR)/%.$(OBJ_EXT): $(SRC_DIR)/%.$(CSRC_EXT) | dirs
 	@$(CC) $(CFLAGS) $(INC) -MD -MP -c -o $@ $<
 
 $(BUILD_DIR)/%.$(OBJ_EXT): $(SRC_DIR)/%.$(ASMSRC_EXT) | dirs
-	$(info Compiling $@)
+	$(info Assembling $@)
 	@mkdir -p $(dir $@)
-	@$(ASMC) $(ASMFLAGS) -o $@ $<
+	@$(ASMBLR) $(ASMFLAGS) -o $@ $<
 
 .PHONY: run clean dirs
 
