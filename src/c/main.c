@@ -68,7 +68,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    printf("Image dims: %dx%d\n", width, height);
     rgb2grayscale(texdata, width, height, &channels);
+    printf("Blur status: %d\n", gblur(texdata, width, height));
 
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
