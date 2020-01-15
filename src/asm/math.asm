@@ -5,10 +5,10 @@
 
 ; Compute arctan(y/x)
 ; Params:
-;     xmm0: y
-;     xmm1: x
+;     xmm0 (scalar): y
+;     xmm1 (scalar): x
 ; Return:
-;     xmm0: result of the computation
+;     xmm0 (scalar): result of the computation
 arctan2:
 .y  equ     8
 .x  equ     0
