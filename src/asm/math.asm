@@ -12,8 +12,6 @@
 arctan2:
 .y  equ     8
 .x  equ     0
-    push    rbp
-    mov     rbp, rsp
     sub     rsp, 16                         ; Local storage
 
     movsd   qword [rsp + .y], xmm0
@@ -27,8 +25,7 @@ arctan2:
     fstp    qword [rsp + .x]                ; Pop result to stack
     movsd   xmm0, qword [rsp + .x]
 
-    mov     rsp, rbp
-    pop     rbp
+    add     rsp, 16                         ; Restore rsp
     ret
 
 ; Compute max of two signed integers
