@@ -110,6 +110,20 @@ gblur:
     sub     ebx, 2                          ; Avoid out-of-bounds access
 
 .hloop:
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+
+    mov     rdi, r8                         ; Setup call (ecx already row idx)
+    mov     edx, esi
+    mov     rsi, r9
+
+    call    filter_outermost_cols
+
+    mov     ecx, r14d
+    mov     edx, r13d
+    mov     esi, r12d
+
     mov     eax, 2                          ; eax counter for inner loop
 
 .hinner_loop:
@@ -228,6 +242,145 @@ gblur:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+; Filter 2 leftmost and 2 rightmost pixels in row
+; Params:
+;     rdi: data pointer (first pixel in pixel array)
+;     rsi: destination pointer (first pixel in pixel array)
+;     edx: width in pixels
+;     ecx: row index
+; Return:
+;     -
+filter_outermost_cols:
+.src        equ 0
+.dst        equ 8
+.width      equ 16
+.row        equ 20
+.bvec       equ 24
+.pxls       equ 28
+    sub     rsp, 32
+
+    mov     dword [rsp + .width], edx       ; Write width and height to stack
+    mov     dword [rsp + .row], ecx
+
+    imul    edx, ecx                        ; ecx has address offset to first pixel in row
+    add     rdi, rdx                        ; Address of first pixel in row in src
+    add     rsi, rdx                        ; Address of first pixel on row in dst
+
+    mov     qword [rsp + .src], rdi         ; Write addresses to stack
+    mov     qword [rsp + .dst], rsi
+
+; First pixel
+    mov     cl, byte [rdi]                  ; First kernel => 2 pixels outside of image => set first 3 bytes in array to first pixel value
+    mov     byte [rsp + .bvec], cl
+    mov     byte [rsp + .bvec + 1], cl
+    mov     byte [rsp + .bvec + 2], cl
+
+    mov     cl, byte [rdi + 1]
+    mov     byte [rsp + .bvec + 3], cl
+
+    add     rdi, 2                          ; Pixel 4 for filter
+    mov     cl, byte [rdi]
+    mov     byte [rsp + .pxls + 3], cl      ; Store pixel value on stack (use last byte of pxls since it's not used yet)
+
+    pxor    xmm0, xmm0
+    pxor    xmm1, xmm1
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 has  pixel 4
+
+    lea     rdi, [rsp + .bvec]
+    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
+
+    call    apply_kernel                    ; al has resulting byte
+
+    mov     byte [rsp + .pxls], al          ; Write result to stack for now
+
+; Second pixel
+    mov     cl, byte [rsp + .bvec + 3]      ; Shift filter kernel to the right
+    mov     byte [rsp + .bvec + 2], cl
+    mov     cl, byte [rsp + .pxls + 3]      ; byte 3 for filter
+    mov     byte [rsp + .bvec + 3], cl
+
+    mov     rdi, qword [rsp + .src]
+    add     rdi, 3                          ; Pixel 4 for filter
+
+    pxor    xmm0, xmm0
+
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+
+    lea     rdi, [rsp + .bvec]
+    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
+
+    call    apply_kernel
+    mov     byte [rsp + .pxls + 1], al      ; Write to stack
+
+; Second to last pixel
+    mov     rsi, qword [rsp + .src]         ; First byte in row
+    mov     edx, dword [rsp + .width]
+    lea     rdi, [rsi + rdx - 1]            ; Address of last pixel on row
+
+    mov     qword [rsp + .src], rdi         ; Write pixel address to stack
+
+    pxor    xmm0, xmm0
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+
+    sub     rdi, 3                          ; rdi first pixel to be filtered
+    xor     ecx, ecx
+    mov     esi, 4
+
+.sl_loop:           
+    mov     dl, byte [rdi + rcx]            ; Write bytes to stack
+    mov     byte [rsp + .bvec + rcx], dl
+
+    inc     ecx
+    cmp     ecx, esi
+    jl      .sl_loop
+
+    lea     rdi, [rsp + .bvec]
+
+    call    bvec2ps
+
+    call    apply_kernel
+    mov     byte [rsp + .pxls + 2], al
+
+; Last pixel
+    mov     rdi, qword [rsp + .src]         ; Last pixel to rdi
+    pxor    xmm0, xmm0
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+
+    mov     ecx, 3
+.l_loop:                                    ; Shift bytes one step to the right (keeping rightmost)
+    dec     ecx
+    mov     dl, byte [rsp + .bvec + rcx + 1]
+    mov     byte [rsp + .bvec + rcx], dl
+
+    jnz     .l_loop
+
+    lea     rdi, [rsp + .bvec]              ; Address of byte array
+
+    call    bvec2ps
+
+    call    apply_kernel
+
+    mov     rsi, qword [rsp + .dst]         ; Load dst pointer
+
+    mov     cl, byte [rsp + .pxls]          ; Write pixels
+    mov     byte [rsi], cl                  ; First pixel on line
+    mov     cl, byte [rsp + .pxls + 1]
+    mov     byte [rsi + 1], cl              ; Second pixel on line
+
+    mov     edx, dword [rsp + .width]       ; Load width
+    add     rsi, rdx
+    lea     rdi, [rsi + rdx - 1]            ; Address to last pixel on dst line
+    mov     byte [rdi], al                  ; al still has the last byte
+    mov     cl, byte [rsp + .pxls + 2]
+    mov     byte [rdi - 1], cl              ; Second to last pixel
+.epi:
+    add     rsp, 32
     ret
 
 ; Convert 4 consecutive bytes to packed single precision floating point
