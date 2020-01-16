@@ -1,2 +1,4 @@
 build/**
 cotg*
+data/*
+!data/goose.jpg
