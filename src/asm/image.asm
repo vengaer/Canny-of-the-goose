@@ -169,6 +169,25 @@ gblur:
     sub     ebx, 2
 
 .vloop:
+    mov     r12d, esi                       ; Preserve registers
+    mov     r13d, edx
+    mov     r14d, ecx
+    mov     r15, r8
+
+    mov     rdi, r9                         ; Setup call
+    mov     r11d, esi
+    mov     rsi, r8
+    mov     r8d, ecx
+    mov     ecx, edx
+    mov     edx, r11d
+
+    call    filter_outermost_rows
+
+    mov     r8, r15                         ; Restore registers
+    mov     ecx, r14d
+    mov     edx, r13d
+    mov     esi, r12d
+
     mov     eax, 2                          ; eax counter for inner loop
 
 .vinner_loop:
@@ -202,6 +221,7 @@ gblur:
 
     lea     rdi, [rsp + .bvec]              ; Address of byte array on stack
 
+    mov     r13d, edx
     mov     r14d, ecx                       ; Preserve registers
     mov     r15d, eax
 
@@ -221,6 +241,7 @@ gblur:
 
     mov     eax, r15d                       ; Restore registers
     mov     ecx, r14d
+    mov     edx, r13d
 
     inc     eax
     cmp     eax, ebx                        ; ebx (rows - 2) upper bound for inner loop
@@ -331,7 +352,7 @@ filter_outermost_cols:
     xor     ecx, ecx
     mov     esi, 4
 
-.sl_loop:           
+.sl_loop:
     mov     dl, byte [rdi + rcx]            ; Write bytes to stack
     mov     byte [rsp + .bvec + rcx], dl
 
@@ -352,13 +373,15 @@ filter_outermost_cols:
     call    byte2ss
     movss   xmm1, xmm0                      ; xmm1 has pixel 4
 
-    mov     ecx, 3
+    xor     ecx, ecx
+    mov     esi, 3
 .l_loop:                                    ; Shift bytes one step to the right (keeping rightmost)
-    dec     ecx
     mov     dl, byte [rsp + .bvec + rcx + 1]
     mov     byte [rsp + .bvec + rcx], dl
 
-    jnz     .l_loop
+    inc     ecx
+    cmp     ecx, esi
+    jl      .l_loop
 
     lea     rdi, [rsp + .bvec]              ; Address of byte array
 
@@ -379,8 +402,160 @@ filter_outermost_cols:
     mov     byte [rdi], al                  ; al still has the last byte
     mov     cl, byte [rsp + .pxls + 2]
     mov     byte [rdi - 1], cl              ; Second to last pixel
-.epi:
+
     add     rsp, 32
+    ret
+
+; Filter 2 topmost and 2 bottommost pixels in column
+; Params:
+;     rdi: data pointer (first pixel in pixel array)
+;     rsi: destination pointer (first pixel in pixel array)
+;     edx: width in pixels
+;     ecx: height in pixels
+;     r8d: column index
+; Return:
+;     -
+filter_outermost_rows:
+.src        equ 0
+.dst        equ 8
+.width      equ 16
+.height     equ 20
+.col        equ 24
+.bvec       equ 28
+.pxls       equ 32
+    sub     rsp, 64
+
+    mov     dword [rsp + .width], edx
+    mov     dword [rsp + .height], ecx
+    mov     dword [rsp + .col], r8d
+
+    add     rdi, r8
+    mov     qword [rsp + .src], rdi         ; Address of pixel on first row in input
+
+    add     rsi, r8
+    mov     qword [rsp + .dst], rsi         ; Address of pixel on first row in output
+
+; First pixel
+    mov     cl, byte [rdi]                  ; Pixel in first row to bytes 0, 1 and 2 for kernel
+    mov     byte [rsp + .bvec], cl
+    mov     byte [rsp + .bvec + 1], cl
+    mov     byte [rsp + .bvec + 2], cl
+    mov     cl, byte [rdi + rdx]            ; Pixel in second row to byte 3
+    mov     byte [rsp + .bvec + 3], cl
+
+    lea     rdi, [rdi + 2 * rdx]            ; Address of 3rd row from the top
+
+    mov     cl, byte [rdi]
+    mov     byte [rsp + .pxls + 3], cl      ; Store pixel 4 on stack
+
+    pxor    xmm0, xmm0
+    pxor    xmm1, xmm1
+    call    byte2ss
+    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
+
+    lea     rdi, [rsp + .bvec]
+
+    call    bvec2ps
+
+    call    apply_kernel
+
+    mov     byte [rsp + .pxls], al          ; First resulting byte to stack
+
+; Second pixel
+    mov     cl, byte [rsp + .bvec + 3]      ; Shift kernel one step down
+    mov     byte [rsp + .bvec + 2], cl
+    mov     cl, byte [rsp + .pxls + 3]
+    mov     byte [rsp + .bvec + 3], cl
+
+    mov     rdi, qword [rsp + .src]
+    mov     edx, dword [rsp + .width]
+
+    imul    edx, 3
+    lea     rdi, [rdi + rdx]                ; Address to pixel 4
+    pxor    xmm0, xmm0
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+
+    lea     rdi, [rsp + .bvec]
+    call    bvec2ps
+
+    call    apply_kernel
+
+    mov    byte [rsp + .pxls + 1], al       ; Write resulting byte to stack
+
+; Second to last pixel
+
+    mov     rdi, qword [rsp + .src]
+    mov     edx, dword [rsp + .width]
+    mov     ecx, dword [rsp + .height]
+    sub     ecx, 4
+    imul    ecx, edx                        ; Offset of pixel on first row of kernel
+    add     rdi, rcx                        ; Address of pixel on first row of kernel
+
+    xor     ecx, ecx
+    mov     esi, 4
+.sl_loop:                                   ; Read 4 last bytes in column to stack
+    mov     r8b, byte [rdi]
+    mov     byte [rsp + .bvec + rcx], r8b
+    add     rdi, rdx
+
+    inc     ecx
+    cmp     ecx, esi
+    jl      .sl_loop
+
+    mov     qword [rsp + .src], rdi         ; Address of pixel in last row to stack
+
+    pxor    xmm0, xmm0
+    call    byte2ss
+    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
+
+
+    lea     rdi, [rsp + .bvec]
+    call    bvec2ps
+
+    call    apply_kernel
+
+    mov     byte [rsp + .pxls + 2], al      ; Result to stack
+
+; Last pixel
+    mov     rdi, qword [rsp + .src]         ; Address of pixel in last row
+
+    pxor    xmm0, xmm0
+    call    byte2ss
+    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
+
+    xor     ecx, ecx
+    mov     esi, 3
+.l_loop:                                    ; Shift kernel one step down
+    mov     r8b, byte [rsp + .bvec + rcx + 1]
+    mov     byte [rsp + .bvec + rcx], r8b
+    inc     ecx
+    cmp     ecx, esi
+    jl      .l_loop
+
+    lea     rdi, [rsp + .bvec]              ; Address of byte array
+
+    call    bvec2ps
+
+    call    apply_kernel
+
+    mov     rsi, qword [rsp + .dst]
+    mov     edx, dword [rsp + .width]
+    mov     ecx, dword [rsp + .height]
+
+    mov     r8b, byte [rsp + .pxls]
+    mov     byte [rsi], r8b                 ; Byte to first row
+    mov     r8b, byte [rsp + .pxls + 1]
+    mov     byte[rsi + rdx], r8b            ; Byte to second row
+
+    sub     ecx, 2
+    imul    ecx, edx
+    add     rsi, rcx
+    mov     r8b, byte [rsp + .pxls + 2]
+    mov     byte [rsi], r8b                 ; Byte to second to last row
+    mov     byte [rsi + rdx], al            ; Byte to last row
+
+    add     rsp, 64
     ret
 
 ; Convert 4 consecutive bytes to packed single precision floating point
