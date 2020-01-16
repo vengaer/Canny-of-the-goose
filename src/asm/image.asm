@@ -17,7 +17,7 @@
 ;     edx: height of image (in pixels)
 ;     rcx: dword pointer to number of channels
 ; Return:
-;     0 on success, 1 on failure (if image has 4 channels)
+;     eax: 0 on success, 1 on failure (if image has 4 channels)
 rgb2grayscale:
     push    rbx
 
