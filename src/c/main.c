@@ -69,8 +69,20 @@ int main(int argc, char **argv) {
     }
 
     printf("Image dims: %dx%d\n", width, height);
-    rgb2grayscale(texdata, width, height, &channels);
-    printf("Blur status: %d\n", gblur(texdata, width, height));
+
+    int color_cvt_status = rgb2grayscale(texdata, width, height, &channels);
+    if(color_cvt_status) {
+        fputs("Color conversion failed\n", stderr);
+        return 1;
+    }
+    puts("Color conversion: Ok");
+
+    int blur_status = gblur(texdata, width, height);
+    if(blur_status) {
+        fputs("Blurring failed", stderr);
+        return 1;
+    }
+    puts("Blur: Ok");
 
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
