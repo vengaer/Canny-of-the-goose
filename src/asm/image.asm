@@ -349,16 +349,9 @@ filter_outermost_cols:
     movss   xmm1, xmm0                      ; xmm1 has pixel 4
 
     sub     rdi, 3                          ; rdi first pixel to be filtered
-    xor     ecx, ecx
-    mov     esi, 4
 
-.sl_loop:
-    mov     dl, byte [rdi + rcx]            ; Write bytes to stack
-    mov     byte [rsp + .bvec + rcx], dl
-
-    inc     ecx
-    cmp     ecx, esi
-    jl      .sl_loop
+    mov     edx, dword [rdi]                ; Copy 4 bytes to stack
+    mov     dword [rsp + .bvec], edx
 
     lea     rdi, [rsp + .bvec]
 
@@ -373,15 +366,10 @@ filter_outermost_cols:
     call    byte2ss
     movss   xmm1, xmm0                      ; xmm1 has pixel 4
 
-    xor     ecx, ecx
-    mov     esi, 3
-.l_loop:                                    ; Shift bytes one step to the right (keeping rightmost)
-    mov     dl, byte [rsp + .bvec + rcx + 1]
-    mov     byte [rsp + .bvec + rcx], dl
-
-    inc     ecx
-    cmp     ecx, esi
-    jl      .l_loop
+    mov     edx, dword [rsp + .bvec]        ; load bytes to edx
+    mov     cl, dl                          ; Preserve rightmost byte over shift
+    shl     edx, 8                          ; Shift out most significant byte
+    mov     dl, cl                          ; Write back least significant byte
 
     lea     rdi, [rsp + .bvec]              ; Address of byte array
 
@@ -389,19 +377,17 @@ filter_outermost_cols:
 
     call    apply_kernel
 
+; Write to dst
     mov     rsi, qword [rsp + .dst]         ; Load dst pointer
 
-    mov     cl, byte [rsp + .pxls]          ; Write pixels
-    mov     byte [rsi], cl                  ; First pixel on line
-    mov     cl, byte [rsp + .pxls + 1]
-    mov     byte [rsi + 1], cl              ; Second pixel on line
+    mov     cx, word [rsp + .pxls]          ; Write two leftmost pixels
+    mov     word [rsi], cx
 
     mov     edx, dword [rsp + .width]       ; Load width
     add     rsi, rdx
-    lea     rdi, [rsi + rdx - 1]            ; Address to last pixel on dst line
-    mov     byte [rdi], al                  ; al still has the last byte
-    mov     cl, byte [rsp + .pxls + 2]
-    mov     byte [rdi - 1], cl              ; Second to last pixel
+    lea     rdi, [rsi + rdx - 2]            ; Address of second to last pixel on line
+    mov     ah, byte [rsp + .pxls + 2]      ; Second to last pixel to ah, al still has last byte
+    mov     word [rdi], ax                  ; Write two leftmost bytes
 
     add     rsp, 32
     ret
