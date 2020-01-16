@@ -578,34 +578,23 @@ byte2ss:
 ;     xmm1 (scalar single precision): pixel 4
 ; Return:
 ;     al: value returned from kernel
-; Prerequisites:
-;     rsp 16-byte aligned
 apply_kernel:
-    push    rbp
-    mov     rbp, rsp
-    and     rsp, -0x10                      ; 16-byte align rsp
-    sub     rsp, 16
     mulps   xmm0, [gauss_weights]           ; Multiply pixels 0-3 (SSE)
 
     pxor    xmm2, xmm2
     movss   xmm2, dword [gauss_weights]     ; Load only first weight to xmm2
     mulss   xmm1, xmm2                      ; Multiply pixel 4 with weight 4 (weight 4 == weight 0)
 
-    movaps  [rsp], xmm0                     ; Store on stack
+    movaps  xmm2, xmm0                      ; Copy xmm0 to xmm2 and shift right 8 bytes
+    psrldq  xmm2, 8
 
-    xor     ecx, ecx
-    mov     edx, 4
-.loop:
-    addss   xmm1, dword [rsp + rcx * 4]     ; Accumulate in xmm1
+    addps   xmm0, xmm2                      ; Add upper half of xmm0 (now in xmm2) to lower half
 
-    inc     ecx
-    cmp     ecx, edx
-    jl      .loop
+    addss   xmm1, xmm0                      ; Accumulate in xmm1
+    psrldq  xmm0, 4
+    addss   xmm1, xmm0
 
     cvtss2si    eax, xmm1
-
-    mov     rsp, rbp
-    pop     rbp
     ret
 
 ; Compute the mean of 3 bytes
