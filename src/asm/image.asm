@@ -17,51 +17,48 @@
 ;     edx: height of image (in pixels)
 ;     rcx: dword pointer to number of channels
 ; Return:
-;     -
+;     0 on success, 1 on failure (if image has 4 channels)
 rgb2grayscale:
-.m  equ     8
-    push    rbp
-    mov     rbp, rsp
-    sub     rsp, 16                         ; Reserve local storage
-
-    push    rcx                             ; rcx used in loop
-    xor     ecx, ecx
-
-    mov     rax, rdi
-
-    push    rbx                             ; Preserve rbx
-    mov     rbx, rsi                        ; Total number of pixels
-    imul    rbx, rdx
-.loop:
     push    rbx
 
-    mov     rbx, rcx                        ; Calculate byte offset (iter_num * 3)
-    mov     qword [rsp + .m], 3
-    imul    rbx, qword [rsp + .m]
+    mov     eax, dword [rcx]
+    cmp     eax, 1                          ; Single channel, no work to be done
+    je      .done
 
-    mov     dil, byte [rax + rbx]           ; Setup call to mean3
-    mov     sil, byte [rax + rbx + 1]
-    mov     dl,  byte [rax + rbx + 2]
+    cmp     eax, 3
+    je      .cvt_rgb
 
-    pop     rbx
-    push rax                                ; Make space for return value
+    mov     eax, 1                          ; Not a 3-channel image, return 1
+    jmp     .epi
 
-    call    mean3
-    mov     dl, al                          ; Store grayscale value
+.cvt_rgb:
+    mov     r8, rdi                         ; Data ptr to r8
 
-    pop rax
-    mov     byte [rax + rcx], dl            ; Write grayscale value
-
-    inc     rcx
-    cmp     rcx, rbx
-    jl      .loop
-
-    pop     rbx
-    pop     rcx
     mov     dword [rcx], 1                  ; Set number of channels to 1
 
-    mov     rsp, rbp
-    pop     rbp
+    xor     ecx, ecx                        ; Loop counter
+
+    mov     r9d, edx                        ; r9d upper bound for loop
+    imul    r9d, esi
+.cvt_pxls:
+    mov     rbx, rcx                        ; 3 channels => multiply pixel offset by 3
+    imul    rbx, 3
+
+    mov     dil, byte [r8 + rbx]            ; Compute pixel mean
+    mov     sil, byte [r8 + rbx + 1]
+    mov     dl,  byte [r8 + rbx + 2]
+
+    call    mean3
+    mov     byte [r8 + rcx], al             ; Write byte
+
+    inc     ecx
+    cmp     ecx, r9d
+    jl      .cvt_pxls
+
+.done:
+    xor     eax, eax
+.epi:
+    pop     rbx
     ret
 
 
@@ -74,8 +71,8 @@ rgb2grayscale:
 ;     eax: 0 on success, 1 on failure
 gblur:
 .data       equ 0
-.w          equ 8
-.h          equ 12
+.width      equ 8
+.height     equ 12
 .bvec       equ 16
 
     push    rbx
@@ -86,8 +83,8 @@ gblur:
     sub     rsp, 32
 
     mov     qword [rsp + .data], rdi        ; Store data on stack
-    mov     dword [rsp + .w], esi
-    mov     dword [rsp + .h], edx
+    mov     dword [rsp + .width], esi
+    mov     dword [rsp + .height], edx
 
     mov     edi, esi                        ; Number of bytes to allocate
     imul    edi, edx
@@ -104,8 +101,8 @@ gblur:
     mov     r9, rax                         ; tmp pointer to r9
 
     mov     r8, qword [rsp + .data]         ; data pointer to r8
-    mov     esi, dword [rsp + .w]           ; width back to esi
-    mov     edx, dword [rsp + .h]           ; height back to edx
+    mov     esi, dword [rsp + .width]       ; width back to esi
+    mov     edx, dword [rsp + .height]      ; height back to edx
 
 ; Horizontal pass
     xor     ecx, ecx                        ; ecx counter for outer loop (rows)
@@ -318,8 +315,8 @@ apply_kernel:
 ; Return:
 ;     al: mean of the inputs
 mean3:
-    push    rbp
-    mov     rbp, rsp
+    xor     eax, eax                        ; Prepare eax
+
     movzx   di, dil                         ; Zero extend (8-bit => 16-bit)
     movzx   si, sil
     movzx   dx, dl
@@ -331,6 +328,4 @@ mean3:
     mov     di, 3
     div     di
 
-    mov     rsp, rbp
-    pop     rbp
     ret
