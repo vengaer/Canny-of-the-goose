@@ -293,13 +293,10 @@ filter_outermost_cols:
     mov     qword [rsp + .dst], rsi
 
 ; First pixel
-    mov     cl, byte [rdi]                  ; First kernel => 2 pixels outside of image => set first 3 bytes in array to first pixel value
-    mov     byte [rsp + .bvec], cl
-    mov     byte [rsp + .bvec + 1], cl
-    mov     byte [rsp + .bvec + 2], cl
-
-    mov     cl, byte [rdi + 1]
-    mov     byte [rsp + .bvec + 3], cl
+    mov     cx, word [rdi]                  ; Only 2 pixels used for first 4 bytes in kernel
+    mov     byte [rsp + .bvec], ch
+    mov     byte [rsp + .bvec + 1], ch
+    mov     word [rsp + .bvec + 2], cx
 
     add     rdi, 2                          ; Pixel 4 for filter
     mov     cl, byte [rdi]
@@ -318,16 +315,15 @@ filter_outermost_cols:
     mov     byte [rsp + .pxls], al          ; Write result to stack for now
 
 ; Second pixel
-    mov     cl, byte [rsp + .bvec + 3]      ; Shift filter kernel to the right
-    mov     byte [rsp + .bvec + 2], cl
+    mov     ecx, dword [rsp + .bvec]        ; Shift byte array 1 byte to the left
+    shl     ecx, 8
     mov     cl, byte [rsp + .pxls + 3]      ; byte 3 for filter
-    mov     byte [rsp + .bvec + 3], cl
+    mov     dword [rsp + .bvec], ecx        ; Write back to stack
 
     mov     rdi, qword [rsp + .src]
     add     rdi, 3                          ; Pixel 4 for filter
 
     pxor    xmm0, xmm0
-
     call    byte2ss
     movss   xmm1, xmm0                      ; xmm1 has pixel 4
 
@@ -421,7 +417,7 @@ filter_outermost_rows:
 
 ; First pixel
     mov     ch, byte [rdi]                  ; Pixel in first row
-    mov     cl, byte [rdi + rdx]            ; Pixel in second row 
+    mov     cl, byte [rdi + rdx]            ; Pixel in second row
     mov     byte [rsp + .bvec], ch          ; Pixel from first row to first, second and third
     mov     byte [rsp + .bvec + 1], ch      ; values for kernel, second row to fourth
     mov     word [rsp + .bvec + 2], cx
