@@ -564,28 +564,22 @@ filter_outermost_rows:
 ; Return:
 ;     xmm0 (packed single precision): zero extended data converted to packed single precision float
 bvec2ps:
-    push    rbp
-    mov     rbp, rsp
-    and     rsp, -0x10
-    sub     rsp, 16
-    xor     ecx, ecx
-    mov     edx, 4
+    pxor    xmm0, xmm0                      ; Zero out xmm0
+    movzx   esi, byte [rdi]                 ; Zero extend first byte to dword
+    cvtsi2ss    xmm0, esi                   ; Convert and write to lower 4 bytes of xmm0
+    pslldq  xmm0, 4                         ; Shift left 4 bytes
 
-    pxor    xmm0, xmm0
+    movzx   esi, byte [rdi + 1]             ; Zero extend second byte
+    cvtsi2ss    xmm0, esi                   ; Convert and write to lower 4 bytes
+    pslldq  xmm0, 4                         ; Shift left 4 bytes
 
-.loop:
-    movzx   esi, byte [rdi + rcx]           ; Read byte and zero extend
-    cvtsi2ss    xmm0, esi                   ; Convert to single precision float
-    movss   dword [rsp + rcx * 4], xmm0     ; Write to stack
+    movzx   esi, byte [rdi + 2]             ; Zero extend third byte
+    cvtsi2ss    xmm0, esi                   ; Convert and write to lower 4 bytes
+    pslldq  xmm0, 4                         ; Shift left 4 bytes
 
-    inc     ecx
-    cmp     ecx, edx
-    jl      .loop
+    movzx   esi, byte [rdi + 3]             ; Zero extend fourth byte
+    cvtsi2ss    xmm0, esi                   ; Convert and write ot lower 4 bytes, xmm0, now packed
 
-    movaps  xmm0, [rsp]
-
-    mov     rsp, rbp
-    pop     rbp
     ret
 
 ; Convert single byte to scalar single precision floating point
