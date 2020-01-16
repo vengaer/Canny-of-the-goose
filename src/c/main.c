@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
     }
     puts("Color conversion: Ok");
 
-    int blur_status = gblur(texdata, width, height);
+    int blur_status = gaussblur(texdata, width, height);
     if(blur_status) {
         fputs("Blurring failed", stderr);
         return 1;

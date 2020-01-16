@@ -5,7 +5,7 @@
 
     section .text
     global rgb2grayscale
-    global gblur
+    global gaussblur
 
     extern malloc
     extern free
@@ -69,7 +69,7 @@ rgb2grayscale:
 ;     edx: height in pixels
 ; Return:
 ;     eax: 0 on success, 1 on failure
-gblur:
+gaussblur:
 .data       equ 0
 .width      equ 8
 .height     equ 12
