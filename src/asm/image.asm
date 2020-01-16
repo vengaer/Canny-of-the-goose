@@ -65,7 +65,7 @@ rgb2grayscale:
     ret
 
 
-; Gaussian blur
+; Gaussian blur using 5x5 convolution kernel
 ; Params:
 ;     rdi: byte ptr to data, overwritten with output
 ;     esi: width in pixels
@@ -73,99 +73,151 @@ rgb2grayscale:
 ; Return:
 ;     eax: 0 on success, 1 on failure
 gblur:
-.dta equ    0
-    push    rbp
-    mov     rbp, rsp
+.data       equ 0
+.w          equ 8
+.h          equ 12
+.bvec       equ 16
 
-    and     rsp, -0x10                      ; 16-byte align rsp
-    sub     rsp, 16
+    push    rbx
+    push    r12                             ; r12-15 used for preserving rsi, rdx, rcx and rax,
+    push    r13                             ; respectively, accross function calls
+    push    r14
+    push    r15
+    sub     rsp, 32
 
-    mov     qword [rsp + .dta], rdi         ; Store data ptr on stack
+    mov     qword [rsp + .data], rdi        ; Store data on stack
+    mov     dword [rsp + .w], esi
+    mov     dword [rsp + .h], edx
 
     mov     edi, esi                        ; Number of bytes to allocate
     imul    edi, edx
 
-    push    rsi                             ; Preserve rsi and rdx for malloc call
-    push    rdx
-
     call    malloc
 
-    pop     rdx
-    pop     rsi
-
-    cmp     rax, 0                          ; Check for NULL
-
+    cmp     rax, 0
     jne     .malloc_succ
 
     mov     eax, 1                          ; malloc failed, return 1
     jmp     .epi
 
 .malloc_succ:
-    mov     r9, rax                         ; Store pointer in r9
+    mov     r9, rax                         ; tmp pointer to r9
+
+    mov     r8, qword [rsp + .data]         ; data pointer to r8
+    mov     esi, dword [rsp + .w]           ; width back to esi
+    mov     edx, dword [rsp + .h]           ; height back to edx
 
 ; Horizontal pass
-    mov     rdi, qword [rsp + .dta]         ; Move data back to rdi
+    xor     ecx, ecx                        ; ecx counter for outer loop (rows)
+    mov     ebx, esi                        ; ebx upper bound for inner loop (cols)
+    sub     ebx, 2                          ; Avoid out-of-bounds access
 
-    xor     ecx, ecx                        ; ecx counter for outer loop
-    push    rbx                             ; ebx for upper bound in column loop
-    mov     ebx, esi
-    sub     ebx, 2                          ; Avoid out-of-bounds access for filter (edges handled separately)
-
-.hloop:                                     ; Loop over rows
-
+.hloop:
     mov     eax, 2                          ; eax counter for inner loop
 
-.hinner_loop:                               ; Loop over cols 2,...,width - 3 (inclusive)
+.hinner_loop:
+    mov     r10d, ecx                       ; Row idx
+    imul    r10d, esi                       ; Address offset of first pixel on current row
+    add     r10d, eax                       ; Address offset of current pixel
 
-    mov     r8d, ecx                        ; Compute data idx
-    imul    r8d, esi
-    add     r8d, eax
-
-    push    rax                             ; Preserve registers
-    push    rsi
-    push    rdx
-    push    rcx
+    mov     r12d, esi                       ; Preserve register values
+    mov     r13d, edx
+    mov     r14d, ecx
+    mov     r15d, eax
 
     pxor    xmm0, xmm0
     pxor    xmm1, xmm1
 
-    add     rdi, r8                         ; Address for center pixel
-    add     rdi, 2                          ; Advance to 4th pixel for filter
+    lea     rdi, [r8 + r10 + 2]             ; Pixel number 4 to be filtered
     call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 holds pixel 4 for filter
+    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
 
-    sub     rdi, 4                          ; Address for 0th pixel for filter
-    call    bytes2ps                        ; xmm0 holds pixels 0, 1, 2 and 3 for filter
+    sub     rdi, 4                          ; Pixel 0 for filter
+    call    bvec2ps                         ; Pixels 0, 1, 2 and 3 in xmm0
 
-    add     rdi, 2                          ; Restore rdi
-    sub     rdi, r8
+    call    apply_kernel                    ; al has pixel value
 
-    call    apply_kernel
+    mov     byte [r9 + r10], al             ; Write byte to tmp array
 
-    mov     byte [r9 + r8], al              ; Write to tmp array
-
-    pop     rcx
-    pop     rdx
-    pop     rsi
-    pop     rax
+    mov     eax, r15d                       ; Restore registers
+    mov     ecx, r14d
+    mov     edx, r13d
+    mov     esi, r12d
 
     inc     eax
-    cmp     eax, ebx
+    cmp     eax, ebx                        ; ebx (cols - 2) upper limit for inner loop
     jl      .hinner_loop
 
     inc     ecx
-    cmp     ecx, edx
+    cmp     ecx, edx                        ; edx (rows) upper limit for outer loop
     jl      .hloop
 
-    pop     rbx
+; Vertical pass
+    xor     ecx, ecx                        ; ecx counter for outer loop (cols)
+    mov     ebx, edx                        ; ebx upper bound for inner loop (rows)
+    sub     ebx, 2
 
-    mov     ecx, esi
-    imul    ecx, edx
-.loop:
-    dec     ecx
-    mov     al, byte [r9 + rcx]
-    mov     byte [rdi + rcx], al
-    jnz     .loop                           ; safe since mov doesn't affect flags
+.vloop:
+    mov     eax, 2                          ; eax counter for inner loop
+
+.vinner_loop:
+    mov     r10d, eax
+    add     r10d, 2                         ; Row idx of pixel 4 in filter
+    imul    r10d, esi                       ; Address offset of first pixel of row of pixel 4
+    add     r10d, ecx                       ; Address offset of pixel 4
+
+    mov     r12d, esi                       ; Preserve esi accross call
+
+    pxor    xmm0, xmm0
+    pxor    xmm1, xmm1
+
+    lea     rdi, [r9 + r10]                 ; Address of pixel 4
+    call    byte2ss
+    movss   xmm1, xmm0                      ; xmm1 holds pixel 4
+
+    mov     esi, r12d                       ; Restore esi
+
+    xor     r11d, r11d
+    mov     r14d, 4
+.read_byte:                                 ; Read 4 bytes in column, store in 4 lowest bytes of r11
+    shl     r11d, 8                         ; Shift existing bytes out of the way
+    sub     r10d, esi                       ; Subtract width to get next pixel
+    mov     r11b, byte [r9 + r10]           ; Read into lower 8 bits
+
+    dec     r14d
+    jnz     .read_byte
+
+    mov     dword [rsp + .bvec], r11d       ; Write all 4 bytes to stack at once
+
+    lea     rdi, [rsp + .bvec]              ; Address of byte array on stack
+
+    mov     r14d, ecx                       ; Preserve registers
+    mov     r15d, eax
+
+    mov     r12d, esi                       ; Preserve esi
+
+    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
+
+    call    apply_kernel                    ; al has pixel value
+
+
+    mov     esi, r12d                       ; Restore esi
+
+    add     r10d, esi                       ; Compute address offset of pixel
+    add     r10d, esi
+
+    mov     byte [r8 + r10], al             ; Write byte
+
+    mov     eax, r15d                       ; Restore registers
+    mov     ecx, r14d
+
+    inc     eax
+    cmp     eax, ebx                        ; ebx (rows - 2) upper bound for inner loop
+    jl      .vinner_loop
+
+    inc     ecx
+    cmp     ecx, esi                        ; esi (width) upper bound for outer loop
+    jl      .vloop
 
 .free:
     mov     rdi, r9                         ; Free malloc'd memory
@@ -173,8 +225,12 @@ gblur:
 
     xor     eax, eax                        ; Return 0
 .epi:
-    mov     rsp, rbp
-    pop     rbp
+    add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 ; Convert 4 consecutive bytes to packed single precision floating point
@@ -182,7 +238,7 @@ gblur:
 ;     rdi: byte pointer to data (at least 4 bytes)
 ; Return:
 ;     xmm0 (packed single precision): zero extended data converted to packed single precision float
-bytes2ps:
+bvec2ps:
     push    rbp
     mov     rbp, rsp
     and     rsp, -0x10
@@ -227,6 +283,9 @@ byte2ss:
 ; Prerequisites:
 ;     rsp 16-byte aligned
 apply_kernel:
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -0x10                      ; 16-byte align rsp
     sub     rsp, 16
     mulps   xmm0, [gauss_weights]           ; Multiply pixels 0-3 (SSE)
 
@@ -247,7 +306,8 @@ apply_kernel:
 
     cvtss2si    eax, xmm1
 
-    add     rsp, 16
+    mov     rsp, rbp
+    pop     rbp
     ret
 
 ; Compute the mean of 3 bytes
