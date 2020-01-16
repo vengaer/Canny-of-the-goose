@@ -14,7 +14,7 @@
 char const *argp_program_version = "canny-of-the-goose 1.0";
 char const *argp_program_bug_address = "<vilhelm.engstrom@tuta.io>";
 
-static char doc[] = "canny-of-the-goose -- Canny edge detection";
+static char doc[] = "cotg (Canny of the Goose) -- Canny edge detection";
 static char args_doc[] = "";
 
 static struct argp_option options[] = {
