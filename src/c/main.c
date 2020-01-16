@@ -68,21 +68,21 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("Image dims: %dx%d\n", width, height);
+    printf("%-20s%dx%d\n", "Image dims:", width, height);
 
     int color_cvt_status = rgb2grayscale(texdata, width, height, &channels);
     if(color_cvt_status) {
-        fputs("Color conversion failed\n", stderr);
+        fprintf(stderr, "Color conversion failed: %d\n", color_cvt_status);
         return 1;
     }
-    puts("Color conversion: Ok");
+    printf("%-20s%d\n", "Color cvt:", color_cvt_status);
 
     int blur_status = gaussblur(texdata, width, height);
     if(blur_status) {
-        fputs("Blurring failed", stderr);
+        fprintf(stderr, "Blur failed: %d\n", blur_status);
         return 1;
     }
-    puts("Blur: Ok");
+    printf("%-20s%d\n", "Blur:", blur_status);
 
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
