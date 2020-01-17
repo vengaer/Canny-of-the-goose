@@ -366,6 +366,7 @@ filter_outermost_cols:
     mov     cl, dl                          ; Preserve rightmost byte over shift
     shl     edx, 8                          ; Shift out most significant byte
     mov     dl, cl                          ; Write back least significant byte
+    mov     dword [rsp + .bvec], edx
 
     lea     rdi, [rsp + .bvec]              ; Address of byte array
 
