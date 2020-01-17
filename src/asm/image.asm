@@ -208,16 +208,22 @@ gaussblur:
     mov     esi, r12d                       ; Restore esi
 
     xor     r11d, r11d
-    mov     r14d, 4
-.read_byte:                                 ; Read 4 bytes in column, store in 4 lowest bytes of r11
-    shl     r11d, 8                         ; Shift existing bytes out of the way
-    sub     r10d, esi                       ; Subtract width to get next pixel
-    mov     r11b, byte [r9 + r10]           ; Read into lower 8 bits
+    sub     r10d, esi                       ; Move up one row
+    mov     r11b, byte [r9 + r10]           ; Pixel 3 for filter will be in most significant byte
+    shl     r11d, 8                         ; of r11d
+    sub     r10d, esi                       ; Up one row
+    mov     r11b, byte [r9 + r10]           ; Pixel 2 in second most significant byte
+    shl     r11d, 8
+    sub     r10d, esi                       ; Up one row
+    mov     r11b, byte [r9 + r10]           ; Pixel 1 in second least significant byte
+    shl     r11d, 8
+    sub     r10d, esi                       ; Up a row
+    mov     r11b, byte [r9 + r10]           ; Pixel 0 in least significant byte
 
-    dec     r14d
-    jnz     .read_byte
+    add     r10d, esi                       ; Address offset of current output pixel
+    add     r10d, esi
 
-    mov     dword [rsp + .bvec], r11d       ; Write all 4 bytes to stack at once
+    mov     dword [rsp + .bvec], r11d       ; Write to stack
 
     lea     rdi, [rsp + .bvec]              ; Address of byte array on stack
 
@@ -233,9 +239,6 @@ gaussblur:
 
 
     mov     esi, r12d                       ; Restore esi
-
-    add     r10d, esi                       ; Compute address offset of pixel
-    add     r10d, esi
 
     mov     byte [r8 + r10], al             ; Write byte
 
