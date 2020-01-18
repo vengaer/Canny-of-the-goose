@@ -1,6 +1,7 @@
     section .text
     global arctan2
     global arctan2pckd
+    global cosine
     global lerp
     global imax
     global imin
@@ -79,6 +80,25 @@ arctan2pckd:
     movss   xmm14, xmm0                     ; Store in xmm14
     movaps  xmm0, xmm14                     ; Result to xmm0
 
+    ret
+
+; Compute cos(x)
+; Params:
+;     xmm0 (scalar single precision): x
+; Return:
+;     xmm0 (scalar single precision): cos(x)
+cosine:
+.x          equ 4
+    sub     rsp, 16
+    movss   dword [rsp + .x], xmm0
+
+    fld     dword [rsp + .x]
+    fcos
+    fstp    dword [rsp + .x]
+
+    movss   xmm0, dword [rsp + .x]
+
+    add     rsp, 16
     ret
     
 
