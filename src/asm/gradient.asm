@@ -198,7 +198,7 @@ sobel:
     pxor    xmm8, xmm8                      ; Horizontal kernel, remaining 6 bytes
     pxor    xmm9, xmm9                      ; Vertical kernel, remaining 6 bytes
 
-    punpckhbw   xmm0, xmm15                 ; Convert high 8 bytes to word
+    punpckhbw   xmm0, xmm15                 ; Convert high 8 bytes to words
     punpckhbw   xmm1, xmm15
     punpckhbw   xmm2, xmm15
 
@@ -211,7 +211,7 @@ sobel:
     psubw   xmm9, xmm2                      ; Subtract third col
 
 ; Second row
-    movdqu  xmm0, [r11 + rax]               ; Center pixel used in neigther horizontal or
+    movdqu  xmm0, [r11 + rax]               ; Center pixel used in neither horizontal nor
     movdqa  xmm2, xmm0                      ; vertical kernel, no need for xmm1
 
     psrldq  xmm2, 2
@@ -279,12 +279,12 @@ sobel:
     punpcklwd   xmm0, xmm15                 ; Low 4 words to dwords
     punpcklwd   xmm1, xmm15
 
-    cvtdq2ps    xmm0, xmm0                  ; To floats
+    cvtdq2ps    xmm0, xmm0                  ; Convert
     cvtdq2ps    xmm1, xmm1
 
     call    arctan2pckd
 
-    movups  [r14 + rax * 4], xmm0           ; 4 32 bit floats to memory
+    movups  [r14 + rax * 4], xmm0           ; Write 4 32 bit floats to memory
 
     movdqa  xmm0, xmm7                      ; Same but with 4 high words
     movdqa  xmm1, xmm6
@@ -323,7 +323,7 @@ sobel:
 
     call    arctan2pckd
 
-    movlps [r14 + rax * 4 + 48], xmm0
+    movlps [r14 + rax * 4 + 48], xmm0       ; Write 2 single precision floats
 
 ; Compute gradient magnitude
     pmullw  xmm6, xmm6                      ; Square
@@ -358,11 +358,11 @@ sobel:
     cvtps2dq    xmm2, xmm2
     cvtps2dq    xmm3, xmm3
 
-    movdqa  [rsp + .f2b], xmm0              ; 4 values on stack, each 32 bits
+    movdqa  [rsp + .f2b], xmm0              ; 4 values to stack, each 32 bits
     mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
     mov     byte [r13 + rax + 1], r15b      ; Write first byte
     shr     r15, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 2], r15b      ; Write second byte and shift out lower 32 bits
+    mov     byte [r13 + rax + 2], r15b      ; Write second byte
 
     mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
     mov     byte [r13 + rax + 3], r15b      ; Write bytes
@@ -373,7 +373,7 @@ sobel:
     mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
     mov     byte [r13 + rax + 5], r15b      ; Write first byte
     shr     r15, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 6], r15b      ; Write second byte and shift out lower 32 bits
+    mov     byte [r13 + rax + 6], r15b      ; Write second byte
 
     mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
     mov     byte [r13 + rax + 7], r15b      ; Write bytes
@@ -384,7 +384,7 @@ sobel:
     mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
     mov     byte [r13 + rax + 9], r15b      ; Write first byte
     shr     r15, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 10], r15b     ; Write second byte and shift out lower 32 bits
+    mov     byte [r13 + rax + 10], r15b     ; Write second byte
 
     mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
     mov     byte [r13 + rax + 11], r15b     ; Write bytes
@@ -395,10 +395,10 @@ sobel:
     mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
     mov     byte [r13 + rax + 13], r15b     ; Write first byte
     shr     r15, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 14], r15b     ; Write second byte and shift out lower 32 bits
+    mov     byte [r13 + rax + 14], r15b     ; Write second byte
 
 
-    add     eax, 14                         ; 14 values processes in parallel
+    add     eax, 14                         ; 14 values processesed per iteration
     cmp     eax, ebx
     jl      .col_loop
 
@@ -491,12 +491,12 @@ non_max_suppression:
 
     mov     r8d, esi
     imul    r8d, 4
-    mov     dword [rsp + .fstride], r8d     ; Number of bytes in a row of floats
+    mov     dword [rsp + .fstride], r8d     ; Number of bytes in a single row of floats
 
     mov     r9, rcx                         ; Address of first float in second row
     add     r9, r8
 
-    mov     r10, rdi                        ; Address of first row of data
+    mov     r10, rdi                        ; Address of first byte in first row of data
     mov     r11, r10
     add     r11, rsi                        ; Address of first byte in second row
     mov     r12, r11
@@ -721,12 +721,12 @@ non_max_suppression:
 
     mov     r14b, al
 
-    mov     dil, byte [r10 + rbx]
+    mov     dil, byte [r10 + rbx]           ; Interpolate between northern and north-eastern pixels
     mov     sil, byte [r10 + rbx + 1]
 
     call    lerp
 
-    mov     esi, r15d
+    mov     esi, r15d                       ; Restore esi
 
     mov     r15b, al
     mov     al, byte [r11 + rbx]
@@ -741,7 +741,7 @@ non_max_suppression:
     jmp     .deg_cmp_done
 
 .suppress:
-    mov     byte [r11 + rbx], 0
+    mov     byte [r11 + rbx], 0             ; Current pixel not max among neighbors on its edge, suppress
 
 .deg_cmp_done:
 
@@ -761,9 +761,9 @@ non_max_suppression:
     xor     eax, eax
 .epi:
     add     rsp, 32
-    pop    r15
-    pop    r14
-    pop    r13
-    pop    r12
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
