@@ -1,9 +1,11 @@
     section .text
     global edgedetect
 
-    global sobel
-
     extern arctan2pckd
+    extern sine
+    extern cosine
+    extern lerp
+    extern rad2deg
     extern malloc
     extern free
 
@@ -49,12 +51,27 @@ edgedetect:
 
     mov     dword [rsp + .rval], eax
 
+    cmp     eax, 0                          ; sobel failed, exit
+    jne     .free
+
+    mov     rsi, qword [rsp + .waddr]       ; Width to esi
+    mov     esi, dword [rsi]
+
+    mov     rdx, qword [rsp + .haddr]       ; Height to edx
+    mov     edx, dword [rdx]
+
+    mov     rdi, qword [rsp + .data]        ; Data ptr to rdi
+    mov     rcx, qword [rsp + .angles]      ; Angle ptr to rcx
+
+    call    non_max_suppression
+
+    mov     dword [rsp + .rval], eax        ; Preserve return value past free
+
 .free:
     mov     rdi, qword [rsp + .angles]
     call    free
 
     mov     eax, dword [rsp + .rval]
-
 .epi:
     add     rsp, 64
     ret
@@ -121,7 +138,7 @@ sobel:
     mov     esi, dword [rsp + .width]       ; width and height back to esi and edx
     mov     edx, dword [rsp + .height]
 
-    mov     r10, qword [rsp + .data]         ; Address of first byte in first row
+    mov     r10, qword [rsp + .data]        ; Address of first byte in first row
     mov     r11, r10
     add     r11, rsi                        ; Address of first byte in second row
     mov     r12, r11
@@ -274,9 +291,6 @@ sobel:
 
     punpckhwd   xmm0, xmm15
     punpckhwd   xmm1, xmm15
-
-    cvtdq2ps    xmm0, xmm0
-    cvtdq2ps    xmm1, xmm1
 
     cvtdq2ps    xmm0, xmm0
     cvtdq2ps    xmm1, xmm1
@@ -447,4 +461,309 @@ sobel:
     pop     r12
     pop     rbx
     pop     rbp
+    ret
+
+; Non-maximum suppression
+; Params:
+;     rdi: byte ptr to data, overwritten with result
+;     esi: width of image in pixels
+;     edx: height of image in pixels
+;     rcx: single precision floating point ptr containing gradient angles
+; Return:
+;     eax: 0 on success, 1 on failure
+non_max_suppression:
+.data       equ 0
+.width      equ 8
+.height     equ 12
+.angles     equ 16
+.fstride    equ 24
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 32
+
+    mov     qword [rsp + .data], rdi        ; Parameters to stack
+    mov     dword [rsp + .width], esi
+    mov     dword [rsp + .height], edx
+    mov     qword [rsp + .angles], rcx
+
+    mov     r8d, esi
+    imul    r8d, 4
+    mov     dword [rsp + .fstride], r8d     ; Number of bytes in a row of floats
+
+    mov     r9, rcx                         ; Address of first float in second row
+    add     r9, r8
+
+    mov     r10, rdi                        ; Address of first row of data
+    mov     r11, r10
+    add     r11, rsi                        ; Address of first byte in second row
+    mov     r12, r11
+    add     r12, rsi                        ; Address of first byte in third row
+
+    mov     ecx, 1                          ; Counter for row loop
+    sub     edx, 1                          ; Upper bound for row loop
+
+    mov     r13d, esi                       ; Upper bound for col loop
+    sub     r13d, 1
+
+.row_loop:
+    mov     ebx, 1                          ; Counter for col loop
+
+.col_loop:
+    movss   xmm0, dword [r9 + rbx * 4]
+    movss   xmm15, xmm0                     ; Preserve xmm0
+
+    call    rad2deg
+
+    cmp     eax, -90
+    je      .vertical                       ; Edge is vertical
+
+    cmp     eax, -45
+    jl      .interp_vert_nw2se              ; Edge has angle ]-90, -45[, interpolate
+    je      .nw2se                          ; Edge has angle -45, check diagonal
+
+    cmp     eax, 0
+    jl      .interp_hor_nw2se               ; Edge has angle ]-45, 0[, interpolate
+    je      .horizontal                     ; Edge is horizontal
+
+    cmp     eax, 45
+    jl      .interp_hor_sw2ne               ; Edge has angle ]0, 45[, interpolate
+    je      .sw2ne                          ; Edge has angle 45, check diagonal
+
+    cmp     eax, 90
+    jl      .interp_vert_sw2ne              ; Edge has angle ]45, 90[, interpolate
+    je      .vertical                       ; Edge is vertical
+
+
+.horizontal:
+    ;  #-----#-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  x-----x-----x
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----#-----#
+
+    mov     r14b, byte [r11 + rbx - 1]
+    mov     al, byte [r11 + rbx]
+    mov     r15b, byte [r11 + rbx + 1]
+
+    jmp     .compare_bytes
+.vertical:
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+
+    mov     r14b, byte [r10 + rbx]
+    mov     al, byte [r11 + rbx]
+    mov     r15b, byte [r12 + rbx]
+
+    jmp     .compare_bytes
+
+.nw2se:
+    ;  x-----#-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----#-----x
+
+    mov     r14b, byte [r10 + rbx - 1]
+    mov     al, byte [r11 + rbx]
+    mov     r15b, byte [r12 + rbx + 1]
+
+    jmp     .compare_bytes
+
+.sw2ne:
+    ;  #-----#-----x
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  x-----#-----#
+
+    mov     r14b, byte [r10 + rbx + 1]
+    mov     al, byte [r11 + rbx]
+    mov     r15b, byte [r12 + rbx - 1]
+    jmp     .compare_bytes
+
+.interp_hor_nw2se:
+    ;  #-----#-----#
+    ;  x     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     x
+    ;  #-----#-----#
+
+    movss   xmm0, xmm15                     ; Angle in radians
+
+    mulss   xmm0, xmm0                      ; Absolute value of angle
+    sqrtss  xmm0, xmm0
+
+    call    sine
+
+    mov     r15d, esi                       ; Preserve esi
+
+    mov     dil, byte [r11 + rbx - 1]       ; Interpolate between western and north-western pixels
+    mov     sil, byte [r10 + rbx - 1]
+
+    call    lerp
+
+    mov     r14b, al
+
+    mov     dil, byte [r11 + rbx + 1]       ; Interpolate between eastern and south-eastern pixels
+    mov     sil, byte [r12 + rbx + 1]
+
+    call    lerp
+
+    mov     esi, r15d                       ; Restore esi
+
+    mov     r15b, al
+    mov     al, byte [r11 + rbx]
+
+    jmp     .compare_bytes
+
+.interp_vert_nw2se:
+    ;  #-x---#-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----#---x-#
+
+    movss   xmm0, xmm15                     ; Angle in radians
+
+    call    cosine
+
+    mov     r15d, esi                       ; Preserve esi
+
+    mov     dil, byte [r10 + rbx]           ; Interpolate between northern and north-western pixels
+    mov     sil, byte [r10 + rbx - 1]
+
+    call    lerp
+
+    mov     r14b, al
+
+    mov     dil, byte [r12 + rbx]           ; Interpolate between southern and south-eastern pixels
+    mov     sil, byte [r12 + rbx + 1]
+
+    call    lerp
+
+    mov     esi, r15d                       ; Restore esi
+
+    jmp     .compare_bytes
+
+
+.interp_hor_sw2ne:
+    ;  #-----#-----#
+    ;  |     |     x
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  x     |     |
+    ;  #-----#-----#
+
+    movss   xmm0, xmm15                     ; Angle in radians
+
+    call    sine
+
+    mov     r15d, esi                       ; Preserve esi
+
+    mov     sil, byte [r11 + rbx - 1]       ; Interpolate between western and south-western pixels
+    mov     dil, byte [r12 + rbx - 1]
+
+    call    lerp
+
+    mov     r14b, al
+
+    mov     dil, byte [r11 + rbx + 1]       ; Interpolate between eastern and south-eastern pixels
+    mov     sil, byte [r10 + rbx + 1]
+
+    call    lerp
+
+    mov     esi, r15d                       ; Restore esi
+
+    mov     r15b, al
+    mov     al, byte [r11 + rbx]
+
+    jmp     .compare_bytes
+
+
+.interp_vert_sw2ne:
+    ;  #-----#---x-#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-x---#-----#
+
+    movss   xmm0, xmm15
+
+    call    cosine
+
+    mov     r15d, esi                       ; Preserve esi
+
+    mov     dil, byte [r12 + rbx]           ; Interpolate between southern and south-western pixels
+    mov     sil, byte [r12 + rbx - 1]
+
+    call    lerp
+
+    mov     r14b, al
+
+    mov     dil, byte [r10 + rbx]
+    mov     sil, byte [r10 + rbx + 1]
+
+    call    lerp
+
+    mov     esi, r15d
+
+    mov     r15b, al
+    mov     al, byte [r11 + rbx]
+
+.compare_bytes:
+    cmp     al, r14b
+    jl      .suppress
+
+    cmp     al, r15b
+    jl      .suppress
+
+    jmp     .deg_cmp_done
+
+.suppress:
+    mov     byte [r11 + rbx], 0
+
+.deg_cmp_done:
+
+    inc     ebx
+    cmp     ebx, r13d
+    jl      .col_loop
+
+    add     r10, rsi                        ; Move to next row
+    add     r11, rsi
+    add     r12, rsi
+    add     r9, r8                          ; Next row in float array
+
+    inc     ecx
+    cmp     ecx, edx
+    jl      .row_loop
+
+    xor     eax, eax
+.epi:
+    add     rsp, 32
+    pop    r15
+    pop    r14
+    pop    r13
+    pop    r12
+    pop     rbx
     ret
