@@ -1,7 +1,7 @@
     section .rodata
 
     align 16
-    gauss_weights: dd 0.06136, 0.24477, 0.38774, 0.24477
+    gauss_weights: dd 0.153388, 0.221461, 0.250301, 0.221461
 
     section .text
     global gaussblur
