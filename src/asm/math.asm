@@ -1,7 +1,13 @@
+    section .rodata
+    pi: dd 3.14159265359
+
     section .text
     global arctan2
     global arctan2pckd
+    global sine
     global cosine
+    global rad2deg
+    global deg2rad
     global lerp
     global imax
     global imin
@@ -82,6 +88,25 @@ arctan2pckd:
 
     ret
 
+; Compute sin(x)
+; Params:
+;     xmm0 (scalar single precision): x
+; Return:
+;     xmm0 (scalar single precision): sin(x)
+sine:
+.x          equ 4
+    sub     rsp, 16
+    movss   dword [rsp + .x], xmm0
+
+    fld     dword [rsp + .x]
+    fsin
+    fstp    dword [rsp + .x]
+
+    movss   xmm0, dword [rsp + .x]
+
+    add     rsp, 16
+    ret
+
 ; Compute cos(x)
 ; Params:
 ;     xmm0 (scalar single precision): x
@@ -100,7 +125,34 @@ cosine:
 
     add     rsp, 16
     ret
-    
+
+; Convert radians to degrees
+; Params:
+;     xmm0 (scalar single precision): angle in radians
+; Return:
+;     eax: angle in degrees
+rad2deg:
+    mov     eax, 180                        ; degree = rax * 180 / PI
+    cvtsi2ss    xmm1, eax
+    divss   xmm1, [pi]
+    mulss   xmm0, xmm1
+    cvtss2si    eax, xmm0
+    ret
+
+; Convert degrees to radians
+; Params:
+;     edi: angle in degrees
+; Return:
+;     xmm0 (scalar single precision): angle in radians
+deg2rad:
+    pxor        xmm0, xmm0
+    pxor        xmm1, xmm1
+    mov     eax, 180
+    cvtsi2ss    xmm1, eax
+    cvtsi2ss    xmm0, edi
+    mulss   xmm0, [pi]
+    divss   xmm0, xmm1
+    ret
 
 ; Linear interpolation of dwords
 ; Params:
