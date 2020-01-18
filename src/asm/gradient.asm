@@ -1,9 +1,63 @@
     section .text
+    global edgedetect
+
     global sobel
 
     extern arctan2pckd
     extern malloc
     extern free
+
+; Edge detection with non-maximum suppression
+; Params:
+;     rdi: byte ptr to data, overwritten with output
+;     rsi: dword ptr to width in pixels
+;     rdx: dword ptr to height in pixels
+; Return:
+;     eax: 0 on success, 1 on failure, 2 if dims are unsuitable
+edgedetect:
+.data       equ 0
+.waddr      equ 8
+.haddr      equ 16
+.angles     equ 24
+.rval       equ 32
+    sub     rsp, 64
+
+    mov     qword [rsp + .data], rdi
+    mov     qword [rsp + .waddr], rsi
+    mov     qword [rsp + .haddr], rdx
+
+    mov     edi, dword [rsi]                ; Number of bytes for angle array
+    imul    edi, dword [rdx]
+    imul    edi, 4
+
+    call    malloc
+
+    cmp     eax, 0
+    jne     .malloc_succ
+
+    inc     eax
+    jmp     .epi
+
+.malloc_succ:
+    mov     qword [rsp + .angles], rax
+    mov     rdi, qword [rsp + .data]
+    mov     rsi, qword [rsp + .waddr]
+    mov     rdx, qword [rsp + .haddr]
+    mov     rcx, rax
+
+    call    sobel
+
+    mov     dword [rsp + .rval], eax
+
+.free:
+    mov     rdi, qword [rsp + .angles]
+    call    free
+
+    mov     eax, dword [rsp + .rval]
+
+.epi:
+    add     rsp, 64
+    ret
 
 ; Apply sobel kernels
 ; Params:

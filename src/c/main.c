@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
     }
     printf("%-20s%d\n", "Blur:", blur_status);
 
-    int edge_status = sobel(texdata, &width, &height);
+    int edge_status = edgedetect(texdata, &width, &height);
     if(edge_status) {
         fprintf(stderr, "Edge detection failed: %d\n", edge_status);
         stbi_image_free(texdata);
