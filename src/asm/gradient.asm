@@ -1,6 +1,7 @@
     section .text
     global sobel
 
+    extern arctan2pckd
     extern malloc
     extern free
 
@@ -9,8 +10,9 @@
 ;     rdi: byte ptr to data, overwritten with output
 ;     rsi: dword ptr to width in pixels
 ;     rdx: dword ptr to height in pixels
+;     rcx: single precision float ptr to which to write gradient angles
 ; Return:
-;     eax: 0 on success, 1 on malloc failure, 2 if dims are unacceptable
+;     eax: 0 on success, 1 on malloc failure, 2 if dims are unsuitable
 sobel:
 .data       equ 0
 .width      equ 8
@@ -18,6 +20,8 @@ sobel:
 .waddr      equ 16
 .haddr      equ 24
 .f2b        equ 32                          ; Used for compressing single precision float to byte
+.angles     equ 48
+.fstride    equ 56                          ; Number of bytes in a row for float array
     push    rbp
     push    rbx
     push    r12
@@ -31,6 +35,7 @@ sobel:
     mov     qword [rsp + .data], rdi        ; Data to stack
     mov     qword [rsp + .waddr], rsi
     mov     qword [rsp + .haddr], rdx
+    mov     qword [rsp + .angles], rcx
 
     mov     esi, dword [rsi]                ; Read width and height
     mov     edx, dword [rdx]
@@ -62,12 +67,14 @@ sobel:
     mov     esi, dword [rsp + .width]       ; width and height back to esi and edx
     mov     edx, dword [rsp + .height]
 
-    mov     r10, r8                         ; Address of first byte in first row
+    mov     r10, qword [rsp + .data]         ; Address of first byte in first row
     mov     r11, r10
     add     r11, rsi                        ; Address of first byte in second row
     mov     r12, r11
     add     r12, rsi                        ; Address of first byte in third row
     mov     r13, r9                         ; tmp ptr to r13
+
+    mov     r14, qword [rsp + .angles]
 
     pxor    xmm15, xmm15
 
@@ -76,6 +83,11 @@ sobel:
 
     mov     ebx, esi                        ; Number of cols to process
     sub     ebx, 2
+
+    mov     r15d, ebx
+    imul    r15d, 4
+
+    mov     qword [rsp + .fstride], r15
 
 .row_loop:
     xor     eax, eax                        ; eax counter for inner loop (cols)
@@ -189,7 +201,63 @@ sobel:
     paddw   xmm9, xmm2
     paddw   xmm9, xmm2
 
-; Compute values
+; Compute gradient angles
+    movdqa  xmm0, xmm7                      ; Vertical to xmm0
+    movdqa  xmm1, xmm6                      ; Horizontal to xmm1
+
+    punpcklwd   xmm0, xmm15                 ; Low 4 words to dwords
+    punpcklwd   xmm1, xmm15
+
+    cvtdq2ps    xmm0, xmm0                  ; To floats
+    cvtdq2ps    xmm1, xmm1
+
+    call    arctan2pckd
+
+    movups  [r14 + rax * 4], xmm0           ; 4 32 bit floats to memory
+
+    movdqa  xmm0, xmm7                      ; Same but with 4 high words
+    movdqa  xmm1, xmm6
+
+    punpckhwd   xmm0, xmm15
+    punpckhwd   xmm1, xmm15
+
+    cvtdq2ps    xmm0, xmm0
+    cvtdq2ps    xmm1, xmm1
+
+    cvtdq2ps    xmm0, xmm0
+    cvtdq2ps    xmm1, xmm1
+
+    call    arctan2pckd
+
+    movups [r14 + rax * 4 + 16], xmm0       ; Write to memory
+
+    movdqa  xmm0, xmm9                      ; 4 low words of xmm9 and xmm8
+    movdqa  xmm1, xmm8
+
+    punpcklwd   xmm0, xmm15
+    punpcklwd   xmm1, xmm15
+
+    cvtdq2ps    xmm0, xmm0
+    cvtdq2ps    xmm1, xmm1
+
+    call    arctan2pckd
+
+    movups  [r14 + rax * 4 + 32], xmm0
+
+    movdqa  xmm0, xmm9                      ; 2 high words of xmm9 and xmm8
+    movdqa  xmm1, xmm8
+
+    punpckhwd   xmm0, xmm15
+    punpckhwd   xmm1, xmm15
+
+    cvtdq2ps    xmm0, xmm0
+    cvtdq2ps    xmm1, xmm1
+
+    call    arctan2pckd
+
+    movlps [r14 + rax * 4 + 48], xmm0
+
+; Compute gradient magnitude
     pmullw  xmm6, xmm6                      ; Square
     pmullw  xmm7, xmm7
     pmullw  xmm8, xmm8
@@ -223,43 +291,43 @@ sobel:
     cvtps2dq    xmm3, xmm3
 
     movdqa  [rsp + .f2b], xmm0              ; 4 values on stack, each 32 bits
-    mov     r14, qword [rsp + .f2b]         ; 8 least significant bytes to r14
-    mov     byte [r13 + rax + 1], r14b      ; Write first byte
-    shr     r14, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 2], r14b      ; Write second byte and shift out lower 32 bits
+    mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
+    mov     byte [r13 + rax + 1], r15b      ; Write first byte
+    shr     r15, 32                         ; Shift out lower 32 bits
+    mov     byte [r13 + rax + 2], r15b      ; Write second byte and shift out lower 32 bits
 
-    mov     r14, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r14
-    mov     byte [r13 + rax + 3], r14b      ; Write bytes
-    shr     r14, 32
-    mov     byte [r13 + rax + 4], r14b
+    mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
+    mov     byte [r13 + rax + 3], r15b      ; Write bytes
+    shr     r15, 32
+    mov     byte [r13 + rax + 4], r15b
 
     movdqa  [rsp + .f2b], xmm1              ; 4 values on stack, each 32 bits
-    mov     r14, qword [rsp + .f2b]         ; 8 least significant bytes to r14
-    mov     byte [r13 + rax + 5], r14b      ; Write first byte
-    shr     r14, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 6], r14b      ; Write second byte and shift out lower 32 bits
+    mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
+    mov     byte [r13 + rax + 5], r15b      ; Write first byte
+    shr     r15, 32                         ; Shift out lower 32 bits
+    mov     byte [r13 + rax + 6], r15b      ; Write second byte and shift out lower 32 bits
 
-    mov     r14, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r14
-    mov     byte [r13 + rax + 7], r14b      ; Write bytes
-    shr     r14, 32
-    mov     byte [r13 + rax + 8], r14b
+    mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
+    mov     byte [r13 + rax + 7], r15b      ; Write bytes
+    shr     r15, 32
+    mov     byte [r13 + rax + 8], r15b
 
     movdqa  [rsp + .f2b], xmm2              ; 4 values on stack, each 32 bits
-    mov     r14, qword [rsp + .f2b]         ; 8 least significant bytes to r14
-    mov     byte [r13 + rax + 9], r14b      ; Write first byte
-    shr     r14, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 10], r14b     ; Write second byte and shift out lower 32 bits
+    mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
+    mov     byte [r13 + rax + 9], r15b      ; Write first byte
+    shr     r15, 32                         ; Shift out lower 32 bits
+    mov     byte [r13 + rax + 10], r15b     ; Write second byte and shift out lower 32 bits
 
-    mov     r14, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r14
-    mov     byte [r13 + rax + 11], r14b     ; Write bytes
-    shr     r14, 32
-    mov     byte [r13 + rax + 12], r14b
+    mov     r15, qword [rsp + .f2b + 8]     ; 8 most significant bytes to r15
+    mov     byte [r13 + rax + 11], r15b     ; Write bytes
+    shr     r15, 32
+    mov     byte [r13 + rax + 12], r15b
 
     movq    [rsp + .f2b], xmm3
-    mov     r14, qword [rsp + .f2b]         ; 8 least significant bytes to r14
-    mov     byte [r13 + rax + 13], r14b     ; Write first byte
-    shr     r14, 32                         ; Shift out lower 32 bits
-    mov     byte [r13 + rax + 14], r14b     ; Write second byte and shift out lower 32 bits
+    mov     r15, qword [rsp + .f2b]         ; 8 least significant bytes to r15
+    mov     byte [r13 + rax + 13], r15b     ; Write first byte
+    shr     r15, 32                         ; Shift out lower 32 bits
+    mov     byte [r13 + rax + 14], r15b     ; Write second byte and shift out lower 32 bits
 
 
     add     eax, 14                         ; 14 values processes in parallel
@@ -270,6 +338,7 @@ sobel:
     add     r11, rsi
     add     r12, rsi
     add     r13, rbx
+    add     r14, qword [rsp + .fstride]
 
     dec     ecx
     jnz     .row_loop
