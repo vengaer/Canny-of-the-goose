@@ -86,6 +86,14 @@ int main(int argc, char **argv) {
     }
     printf("%-20s%d\n", "Blur:", blur_status);
 
+    int edge_status = sobel(texdata, &width, &height);
+    if(edge_status) {
+        fprintf(stderr, "Edge detection failed: %d\n", edge_status);
+        stbi_image_free(texdata);
+        return 1;
+    }
+    printf("%-20s%d\n", "Edge detection:", edge_status);
+
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
     stbi_image_free(texdata);
