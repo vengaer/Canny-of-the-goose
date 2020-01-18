@@ -73,6 +73,7 @@ int main(int argc, char **argv) {
     int color_cvt_status = rgb2grayscale(texdata, width, height, &channels);
     if(color_cvt_status) {
         fprintf(stderr, "Color conversion failed: %d\n", color_cvt_status);
+        stbi_image_free(texdata);
         return 1;
     }
     printf("%-20s%d\n", "Color cvt:", color_cvt_status);
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
     int blur_status = gaussblur(texdata, width, height);
     if(blur_status) {
         fprintf(stderr, "Blur failed: %d\n", blur_status);
+        stbi_image_free(texdata);
         return 1;
     }
     printf("%-20s%d\n", "Blur:", blur_status);
