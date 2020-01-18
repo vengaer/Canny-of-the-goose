@@ -428,7 +428,7 @@ sobel:
     div     ebx
     cmp     edx, 0
 
-    jnz     .copy_bytewise                  ; Not multiple of 4, copy byte by byte
+    jne     .copy_bytewise                  ; Not multiple of 4, copy byte by byte
 
     sub     ecx, 4                          ; Otherwise, multiple of 4, copy chunks of 32-bits
 .write_dword:
