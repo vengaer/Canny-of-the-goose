@@ -31,9 +31,6 @@ dbl_threshold:
 
     mov     r8, rdi                         ; Data pointer to r8
 
-    pxor    xmm13, xmm13
-    pxor    xmm14, xmm14
-
     movss   xmm13, xmm0                     ; Store thresholds
     movss   xmm14, xmm1
 
@@ -97,37 +94,37 @@ dbl_threshold:
     idiv    ecx                             ; eax number of iterations
                                             ; edx remaining bytes
 
-    movdqa  xmm4, xmm0                     ; Preserve xmm0 and xmm1
-    movdqa  xmm5, xmm1
+    movdqa  xmm3, xmm0                     ; Preserve xmm0 and xmm1
+    movdqa  xmm4, xmm1
 
 .process_batch:
-    movq    xmm3, [r8]                      ; Load 8 bytes
-    punpcklbw   xmm3, xmm15                 ; To words
+    movq    xmm2, [r8]                      ; Load 8 bytes
+    punpcklbw   xmm2, xmm15                 ; To words
 
-    movdqa  xmm0, xmm4
-    movdqa  xmm1, xmm5
+    movdqa  xmm0, xmm3
+    movdqa  xmm1, xmm4
 
-    movdqa  xmm6, xmm3                      ; Preserve xmm3
+    movdqa  xmm5, xmm2                      ; Preserve xmm2
 
-    pcmpgtw xmm3, xmm0                      ; xmm0 mask for low threshold
-    movdqa  xmm0, xmm3                      ; 0 if word is greater than low threshold, all 1's otherwise
+    pcmpgtw xmm2, xmm0                      ; 0 if word is greater than low threshold, all 1's otherwise
+    movdqa  xmm0, xmm2                      ; xmm2 mask for low threshold
 
-    movdqa  xmm3, xmm6
-    pcmpgtw xmm3, xmm1                      ; xmm1 mask for high threshold
-    movdqa  xmm1, xmm3                      ; 0 if word is greater than high threshold, all 1's otherwise
+    movdqa  xmm2, xmm5
+    pcmpgtw xmm2, xmm1                      ; 0 if word is greater than high threshold, all 1's otherwise
+    movdqa  xmm1, xmm2                      ; xmm1 mask for high threshold
 
     pxor    xmm0, xmm1                      ; xmm0 all ones if value larger than low and smaller than high
 
-    movdqa  xmm3, xmm6
-    movdqa  xmm3, xmm0                      ; Weak pixel mask
-    pand    xmm3, [low_intens]              ; Set to low_intens values (effectively)
+    movdqa  xmm2, xmm5
+    movdqa  xmm2, xmm0                      ; Weak pixel mask
+    pand    xmm2, [low_intens]              ; Set to low_intens values (effectively)
 
-    movdqa  xmm6, xmm1                      ; Mask strong pixels
-    pand    xmm6, [high_intens]             ; Set to high_intens values
+    movdqa  xmm5, xmm1                      ; Mask strong pixels
+    pand    xmm5, [high_intens]             ; Set to high_intens values
 
-    por    xmm3, xmm6                       ; Combine high and low values
+    por     xmm2, xmm5                      ; Combine high and low values
 
-    movq    rcx, xmm3                       ; 4 words to rcx, want low byte of each
+    movq    rcx, xmm2                       ; 4 words to rcx, want low byte of each
     mov     byte [r8], cl                   ; Write to memory
     shr     rcx, 16
     mov     byte [r8 + 1], cl
@@ -136,8 +133,8 @@ dbl_threshold:
     shr     rcx, 16
     mov     byte [r8 + 3], cl
 
-    psrldq  xmm3, 8                         ; Shift out low 8 bytes
-    movq    rcx, xmm3                       ; 8 words to rcx, want low byte of each
+    psrldq  xmm2, 8                         ; Shift out low 8 bytes
+    movq    rcx, xmm2                       ; 8 words to rcx, want low byte of each
     mov     byte [r8 + 4], cl               ; Write to memory
     shr     rcx, 16
     mov     byte [r8 + 5], cl
@@ -241,5 +238,6 @@ find_maxpx:
     jnz     .process_single
 
     mov     al, cl
+.epi:
     pop     rbx
     ret
