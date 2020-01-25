@@ -1,8 +1,12 @@
+    section .rodata
+    one: dd 1.0
+
     section .text
     global edgedetect
 
     extern arctan2pckd
-    extern sine
+    extern tangent
+    extern sine 
     extern cosine
     extern lerp
     extern rad2deg
@@ -609,7 +613,7 @@ non_max_suppression:
     mulss   xmm0, xmm0                      ; Absolute value of angle
     sqrtss  xmm0, xmm0
 
-    call    sine
+    call    tangent
 
     mov     r15d, esi                       ; Preserve esi
 
@@ -632,38 +636,6 @@ non_max_suppression:
 
     jmp     .compare_bytes
 
-.interp_vert_nw2se:
-    ;  #-x---#-----#
-    ;  |     |     |
-    ;  |     |     |
-    ;  #-----x-----#
-    ;  |     |     |
-    ;  |     |     |
-    ;  #-----#---x-#
-
-    movss   xmm0, xmm15                     ; Angle in radians
-
-    call    cosine
-
-    mov     r15d, esi                       ; Preserve esi
-
-    mov     dil, byte [r10 + rbx]           ; Interpolate between northern and north-western pixels
-    mov     sil, byte [r10 + rbx - 1]
-
-    call    lerp
-
-    mov     r14b, al
-
-    mov     dil, byte [r12 + rbx]           ; Interpolate between southern and south-eastern pixels
-    mov     sil, byte [r12 + rbx + 1]
-
-    call    lerp
-
-    mov     esi, r15d                       ; Restore esi
-
-    jmp     .compare_bytes
-
-
 .interp_hor_sw2ne:
     ;  #-----#-----#
     ;  |     |     x
@@ -675,7 +647,7 @@ non_max_suppression:
 
     movss   xmm0, xmm15                     ; Angle in radians
 
-    call    sine
+    call    tangent
 
     mov     r15d, esi                       ; Preserve esi
 
@@ -698,31 +670,93 @@ non_max_suppression:
 
     jmp     .compare_bytes
 
+.interp_vert_nw2se:
 
-.interp_vert_sw2ne:
-    ;  #-----#---x-#
-    ;  |     |     |
-    ;  |     |     |
-    ;  #-----x-----#
-    ;  |     |     |
-    ;  |     |     |
+    ; For angle theta:
+    ;           1
+    ;        |-----|
     ;  #-x---#-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#  -     -
+    ;  |     | \   |  |  1  |
+    ;  |     |  \  |  |     |  tan(theta)
+    ;  #-----#---x-#  -     |
+    ;             \|        |
+    ;              *        -
+    ;            |-|
+    ;             d
+    ;  Using uniformity:
+    ;        1             d                  tan(theta) - 1
+    ;   ---------- = -------------- <=>  d =  --------------
+    ;   tan(theta)   tan(theta) - 1             tan(theta)
 
-    movss   xmm0, xmm15
+    movss   xmm0, xmm15                     ; Angle in radians
 
-    call    cosine
+    call    tangent
+
+    movss   xmm1, xmm0                      ; tangent of angle to xmm1
+    subss   xmm0, [one]
+    divss   xmm0, xmm1                      ; xmm0 has distance d from figure
 
     mov     r15d, esi                       ; Preserve esi
 
-    mov     dil, byte [r12 + rbx]           ; Interpolate between southern and south-western pixels
-    mov     sil, byte [r12 + rbx - 1]
+    mov     dil, byte [r10 + rbx - 1]       ; Interpolate between north-western and northern pixels
+    mov     sil, byte [r10 + rbx]
 
     call    lerp
 
     mov     r14b, al
 
-    mov     dil, byte [r10 + rbx]           ; Interpolate between northern and north-eastern pixels
-    mov     sil, byte [r10 + rbx + 1]
+    mov     dil, byte [r12 + rbx + 1]       ; Interpolate between south-eastern and southern pixels
+    mov     sil, byte [r12 + rbx]
+
+    call    lerp
+
+    mov     esi, r15d                       ; Restore esi
+
+    jmp     .compare_bytes
+
+
+.interp_vert_sw2ne:
+    ; Angle theta
+    ;             d
+    ;            |-|
+    ;              *             -
+    ;             /|             |
+    ;  #-----#---x-#  -          | tan(theta)
+    ;  |     |  /  |  | 1        |
+    ;  |     | /   |  |          |
+    ;  #-----x-----#  -          -
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-x---#-----#
+    ;        |-----|
+    ;           1
+    ; Uniformity =>
+    ;        1             d                  tan(theta) - 1
+    ;   ---------- = -------------- <=>  d =  --------------
+    ;   tan(theta)   tan(theta) - 1             tan(theta)
+
+    movss   xmm0, xmm15
+
+    call    tangent
+
+    movss   xmm1, xmm0                      ; tangent of theta to xmm1
+    subss   xmm0, [one]
+    divss   xmm0, xmm1                      ; Distance d in figure in xmm0
+
+    mov     r15d, esi                       ; Preserve esi
+
+    mov     dil, byte [r12 + rbx - 1]       ; Interpolate between southern and south-western pixels
+    mov     sil, byte [r12 + rbx]
+
+    call    lerp
+
+    mov     r14b, al
+
+    mov     dil, byte [r10 + rbx + 1]       ; Interpolate between northern and north-eastern pixels
+    mov     sil, byte [r10 + rbx]
 
     call    lerp
 
