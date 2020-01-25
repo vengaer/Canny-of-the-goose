@@ -106,11 +106,11 @@ dbl_threshold:
 
     movdqa  xmm5, xmm2                      ; Preserve xmm2
 
-    pcmpgtw xmm2, xmm0                      ; 0 if word is greater than low threshold, all 1's otherwise
+    pcmpgtw xmm2, xmm0                      ; 0 if word is less than low threshold, all 1's otherwise
     movdqa  xmm0, xmm2                      ; xmm2 mask for low threshold
 
     movdqa  xmm2, xmm5
-    pcmpgtw xmm2, xmm1                      ; 0 if word is greater than high threshold, all 1's otherwise
+    pcmpgtw xmm2, xmm1                      ; 0 if word is less than high threshold, all 1's otherwise
     movdqa  xmm1, xmm2                      ; xmm1 mask for high threshold
 
     pxor    xmm0, xmm1                      ; xmm0 all ones if value larger than low and smaller than high
