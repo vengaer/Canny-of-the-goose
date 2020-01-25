@@ -94,6 +94,9 @@ int main(int argc, char **argv) {
     }
     printf("%-20s%d\n", "Edge detection:", edge_status);
 
+    dbl_threshold(texdata, width, height, 0.05f, 0.5f);
+    printf("%-20s%d\n", "Double threshold:", 0); /* Cannot fail */
+
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
     stbi_image_free(texdata);
