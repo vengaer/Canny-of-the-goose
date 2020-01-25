@@ -1,5 +1,4 @@
     section .rodata
-    one: dd 1.0
     pi_half: dd 1.57079632679
 
     section .text
