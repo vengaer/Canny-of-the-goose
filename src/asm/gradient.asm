@@ -1,13 +1,12 @@
     section .rodata
     one: dd 1.0
+    pi_half: dd 1.57079632679
 
     section .text
     global edgedetect
 
     extern arctan2pckd
     extern tangent
-    extern sine 
-    extern cosine
     extern lerp
     extern rad2deg
     extern malloc
@@ -672,44 +671,32 @@ non_max_suppression:
 
 .interp_vert_nw2se:
 
-    ; For angle theta:
-    ;           1
-    ;        |-----|
     ;  #-x---#-----#
     ;  |     |     |
     ;  |     |     |
-    ;  #-----x-----#  -     -
-    ;  |     | \   |  |  1  |
-    ;  |     |  \  |  |     |  tan(theta)
-    ;  #-----#---x-#  -     |
-    ;             \|        |
-    ;              *        -
-    ;            |-|
-    ;             d
-    ;  Using uniformity:
-    ;        1             d                  tan(theta) - 1
-    ;   ---------- = -------------- <=>  d =  --------------
-    ;   tan(theta)   tan(theta) - 1             tan(theta)
+    ;  #-----x-----#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----#---x-#
+    ;        |---|
+    ;          d
 
     movss   xmm0, xmm15                     ; Angle in radians
+    addss   xmm0, [pi_half]                 ; Add pi/2 to angle
 
-    call    tangent
-
-    movss   xmm1, xmm0                      ; tangent of angle to xmm1
-    subss   xmm0, [one]
-    divss   xmm0, xmm1                      ; xmm0 has distance d from figure
+    call    tangent                         ; Tangent computes distance d in figure
 
     mov     r15d, esi                       ; Preserve esi
 
-    mov     dil, byte [r10 + rbx - 1]       ; Interpolate between north-western and northern pixels
-    mov     sil, byte [r10 + rbx]
+    mov     dil, byte [r10 + rbx]           ; Interpolate between north-western and northern pixels
+    mov     sil, byte [r10 + rbx - 1]
 
     call    lerp
 
     mov     r14b, al
 
-    mov     dil, byte [r12 + rbx + 1]       ; Interpolate between south-eastern and southern pixels
-    mov     sil, byte [r12 + rbx]
+    mov     dil, byte [r12 + rbx]           ; Interpolate between south-eastern and southern pixels
+    mov     sil, byte [r12 + rbx + 1]
 
     call    lerp
 
@@ -719,44 +706,33 @@ non_max_suppression:
 
 
 .interp_vert_sw2ne:
-    ; Angle theta
-    ;             d
-    ;            |-|
-    ;              *             -
-    ;             /|             |
-    ;  #-----#---x-#  -          | tan(theta)
-    ;  |     |  /  |  | 1        |
-    ;  |     | /   |  |          |
-    ;  #-----x-----#  -          -
+
+    ;          d
+    ;        |---|
+    ;  #-----#---x-#
+    ;  |     |     |
+    ;  |     |     |
+    ;  #-----x-----#
     ;  |     |     |
     ;  |     |     |
     ;  #-x---#-----#
-    ;        |-----|
-    ;           1
-    ; Uniformity =>
-    ;        1             d                  tan(theta) - 1
-    ;   ---------- = -------------- <=>  d =  --------------
-    ;   tan(theta)   tan(theta) - 1             tan(theta)
 
     movss   xmm0, xmm15
+    addss   xmm0, [pi_half]                 ; Add pi/2
 
-    call    tangent
-
-    movss   xmm1, xmm0                      ; tangent of theta to xmm1
-    subss   xmm0, [one]
-    divss   xmm0, xmm1                      ; Distance d in figure in xmm0
+    call    tangent                         ; tangent computes distance d in figure
 
     mov     r15d, esi                       ; Preserve esi
 
-    mov     dil, byte [r12 + rbx - 1]       ; Interpolate between southern and south-western pixels
-    mov     sil, byte [r12 + rbx]
+    mov     dil, byte [r12 + rbx]           ; Interpolate between southern and south-western pixels
+    mov     sil, byte [r12 + rbx - 1]
 
     call    lerp
 
     mov     r14b, al
 
-    mov     dil, byte [r10 + rbx + 1]       ; Interpolate between northern and north-eastern pixels
-    mov     sil, byte [r10 + rbx]
+    mov     dil, byte [r10 + rbx]           ; Interpolate between northern and north-eastern pixels
+    mov     sil, byte [r10 + rbx + 1]
 
     call    lerp
 
