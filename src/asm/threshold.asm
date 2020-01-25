@@ -18,13 +18,12 @@ dbl_threshold:
 .data       equ 0
 .width      equ 8
 .height     equ 12
-.lthres     equ 16
-.tmp        equ 32
+.thres      equ 16
     push    rbp
     push    rbx
     mov     rbp, rsp
     and     rsp, -0x10
-    sub     rsp, 64
+    sub     rsp, 32
 
     mov     qword [rsp + .data], rdi        ; Data to stack
     mov     dword [rsp + .width], esi
@@ -68,8 +67,8 @@ dbl_threshold:
     shl     r11, 32
     or      r9, r11                         ; Each byte in r9 has low threshold
 
-    mov     qword [rsp + .lthres], r9
-    movq    xmm0, [rsp + .lthres]           ; 8 low bytes of xmm0 have low threshold
+    mov     qword [rsp + .thres], r9
+    movq    xmm0, [rsp + .thres]            ; 8 low bytes of xmm0 have low threshold
     punpcklbw   xmm0, xmm15                 ; Each word in xmm0 has low threshold
 
     xor     r11d, r11d
@@ -84,8 +83,8 @@ dbl_threshold:
     shl     r11, 32
     or      r10, r11                        ; Each byte in r10 has high threshold
 
-    mov     qword [rsp + .lthres], r10
-    movq    xmm1, [rsp + .lthres]           ; 8 low bytes of xmm1 have high threshold
+    mov     qword [rsp + .thres], r10
+    movq    xmm1, [rsp + .thres]            ; 8 low bytes of xmm1 have high threshold
     punpcklbw   xmm1, xmm15                 ; Each word in xmm1 has high threshold
 
     mov     esi, dword [rsp + .width]       ; Width and height from stack
