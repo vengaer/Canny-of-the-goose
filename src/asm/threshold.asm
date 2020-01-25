@@ -220,7 +220,7 @@ find_maxpx:
     pmaxub  xmm0, xmm1
 
     movd    ebx, xmm0
-    and     ebx, 0xff                       ; Zero everything but low byte in ebx
+    and     bx, 0xff                        ; Zero everything but low byte in bx
 
     cmp     cl, bl
     cmovb   cx, bx                          ; New max to ecx if cl less than bl
