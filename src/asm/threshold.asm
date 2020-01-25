@@ -194,7 +194,7 @@ find_maxpx:
 
     xor     ecx, ecx                        ; ecx to hold max value
 
-.process_batch:                             ; Max reduction over 32 byte batche
+.process_batch:                             ; Max reduction over 32 byte batch
     movdqu  xmm0, [rdi]
     movdqu  xmm1, [rdi + 16]
 
