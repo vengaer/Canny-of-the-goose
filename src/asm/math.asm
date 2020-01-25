@@ -4,6 +4,7 @@
     section .text
     global arctan2
     global arctan2pckd
+    global tangent
     global sine
     global cosine
     global rad2deg
@@ -88,13 +89,32 @@ arctan2pckd:
 
     ret
 
+; Compute tan(x)
+; Params:
+;     xmm0 (scalar single precision): x
+; Return:
+;     xmm0 (scalar single precision): tan(x)
+tangent:
+.x          equ 0
+    sub     rsp, 16
+    movss   dword [rsp + .x], xmm0
+
+    fld     dword [rsp + .x]
+    fptan
+    fstp    dword [rsp + .x]
+
+    movss   xmm0, dword [rsp + .x]
+
+    add     rsp, 16
+    ret
+
 ; Compute sin(x)
 ; Params:
 ;     xmm0 (scalar single precision): x
 ; Return:
 ;     xmm0 (scalar single precision): sin(x)
 sine:
-.x          equ 4
+.x          equ 0
     sub     rsp, 16
     movss   dword [rsp + .x], xmm0
 
@@ -113,7 +133,7 @@ sine:
 ; Return:
 ;     xmm0 (scalar single precision): cos(x)
 cosine:
-.x          equ 4
+.x          equ 0
     sub     rsp, 16
     movss   dword [rsp + .x], xmm0
 
