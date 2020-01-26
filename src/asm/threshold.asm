@@ -1,4 +1,5 @@
     section .rodata
+    align 16
     low_intens: dw 50, 50, 50, 50, 50, 50, 50, 50
     high_intens: dw 255, 255, 255, 255, 255, 255, 255, 255
 
@@ -80,6 +81,8 @@ dbl_threshold:
 
     mov     esi, dword [rsp + .width]       ; Width and height from stack
     mov     edx, dword [rsp + .height]
+    movdqa  xmm6, [low_intens]              ; Intensity values to xmm6 and xmm7
+    movdqa  xmm7, [high_intens]
 
     imul    esi, edx                        ; Total number of bytes
     mov     eax, esi
@@ -101,7 +104,7 @@ dbl_threshold:
     movdqa  xmm5, xmm2                      ; Preserve xmm2
 
     pcmpgtw xmm2, xmm0                      ; 0 if word is greater than low threshold, all 1's otherwise
-    movdqa  xmm0, xmm2                      ; xmm2 mask for low threshold
+    movdqa  xmm0, xmm2                      ; xmm0 mask for low threshold
 
     movdqa  xmm2, xmm5
     pcmpgtw xmm2, xmm1                      ; 0 if word is greater than high threshold, all 1's otherwise
@@ -111,10 +114,10 @@ dbl_threshold:
 
     movdqa  xmm2, xmm5
     movdqa  xmm2, xmm0                      ; Weak pixel mask
-    pand    xmm2, [low_intens]              ; Set to low_intens values (effectively)
+    pand    xmm2, xmm6                      ; Set to low_intens values (effectively)
 
     movdqa  xmm5, xmm1                      ; Mask strong pixels
-    pand    xmm5, [high_intens]             ; Set to high_intens values
+    pand    xmm5, xmm7                      ; Set to high_intens values
 
     por     xmm2, xmm5                      ; Combine high and low values
 
