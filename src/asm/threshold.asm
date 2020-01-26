@@ -1,6 +1,6 @@
     section .rodata
     low_intens: dw 50, 50, 50, 50, 50, 50, 50, 50
-    high_intens: dw 254, 254, 254, 254, 254, 254, 254, 254
+    high_intens: dw 255, 255, 255, 255, 255, 255, 255, 255
 
     section .text
     global dbl_threshold
