@@ -148,7 +148,7 @@ dbl_threshold:
 
     mov     qword [r8], rcx                 ; Write to memory
 
-r   add     r8, 8                           ; Processing 8 bytes per iteration
+    add     r8, 8                           ; Processing 8 bytes per iteration
     dec     eax
     jnz     .process_batch
 
@@ -235,6 +235,9 @@ find_maxpx:
 
     xor     ebx, ebx
 
+    cmp     edx, 0                          ; Bytes multiple of 32, no more work
+    je      .done
+
 .process_single:                            ; Process remaining bytes (< 32)
     mov     bl, byte [rdi]
 
@@ -245,6 +248,7 @@ find_maxpx:
     dec     edx
     jnz     .process_single
 
+.done:
     mov     al, cl
 .epi:
     pop     rbx
