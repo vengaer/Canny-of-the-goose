@@ -121,26 +121,34 @@ dbl_threshold:
 
     por     xmm2, xmm5                      ; Combine high and low values
 
-    movq    rcx, xmm2                       ; 4 words to rcx, want low byte of each
-    mov     byte [r8], cl                   ; Write to memory
-    shr     rcx, 16
-    mov     byte [r8 + 1], cl
-    shr     rcx, 16
-    mov     byte [r8 + 2], cl
-    shr     rcx, 16
-    mov     byte [r8 + 3], cl
+    xor     ecx, ecx
+    pextrb  ebx, xmm2, 14                   ; Low byte of each word in xmm2 to rcx
+    mov     cl, bl
+    shl     ecx, 8
+    pextrb  ebx, xmm2, 12
+    mov     cl, bl
+    shl     ecx, 8
+    pextrb  ebx, xmm2, 10
+    mov     cl, bl
+    shl     ecx, 8
+    pextrb  ebx, xmm2, 8
+    mov     cl, bl
+    shl     rcx, 8
+    pextrb  ebx, xmm2, 6
+    mov     cl, bl
+    shl     rcx, 8
+    pextrb  ebx, xmm2, 4
+    mov     cl, bl
+    shl     rcx, 8
+    pextrb  ebx, xmm2, 2
+    mov     cl, bl
+    shl     rcx, 8
+    pextrb  ebx, xmm2, 0
+    mov     cl, bl
 
-    psrldq  xmm2, 8                         ; Shift out low 8 bytes
-    movq    rcx, xmm2                       ; 8 words to rcx, want low byte of each
-    mov     byte [r8 + 4], cl               ; Write to memory
-    shr     rcx, 16
-    mov     byte [r8 + 5], cl
-    shr     rcx, 16
-    mov     byte [r8 + 6], cl
-    shr     rcx, 16
-    mov     byte [r8 + 7], cl
+    mov     qword [r8], rcx                 ; Write to memory
 
-    add     r8, 8                           ; Processing 8 bytes per iteration
+r   add     r8, 8                           ; Processing 8 bytes per iteration
     dec     eax
     jnz     .process_batch
 
@@ -226,6 +234,7 @@ find_maxpx:
     jnz     .process_batch
 
     xor     ebx, ebx
+
 .process_single:                            ; Process remaining bytes (< 32)
     mov     bl, byte [rdi]
 
