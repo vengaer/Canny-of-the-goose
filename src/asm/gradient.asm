@@ -117,7 +117,7 @@ sobel:
     mov     dword [rsp +.height], edx
 
     mov     eax, 2                          ; Return 2 if dims are unsuitable
-    cmp     esi, 3                          ; Image must have at least 3 cols
+    cmp     esi, 14                         ; Image must have at least 14 cols
     jl      .epi
     cmp     edx, 3                          ; Image must have at least 3 rows
     jl      .epi
