@@ -1,3 +1,7 @@
+    section .rodata
+    align 16
+    threes: dd 3.0, 3.0, 3.0, 3.0
+
     section .text
     global rgb2grayscale
 
@@ -8,69 +12,138 @@
 ;     edx: height of image (in pixels)
 ;     rcx: dword pointer to number of channels
 ; Return:
-;     eax: 0 on success, 1 on failure (if image has 4 channels)
+;     eax: 0 on success, 1 on failure (image has 4 channels)
 rgb2grayscale:
     push    rbx
 
-    mov     eax, dword [rcx]
-    cmp     eax, 1                          ; Single channel, no work to be done
+    mov     ebx, dword [rcx]                ; Number of channels
+
+    xor     eax, eax
+    cmp     ebx, 1                          ; Already grayscale?
     je      .done
 
-    cmp     eax, 3
-    je      .cvt_rgb
+    cmp     ebx, 3
+    je      .cvt
 
-    mov     eax, 1                          ; Not a 3-channel image, return 1
+    inc     eax                             ; 4 channels, return 1
     jmp     .epi
 
-.cvt_rgb:
-    mov     r8, rdi                         ; Data ptr to r8
+.cvt:
+    mov     dword [rcx], 1                  ; Set number of channels
 
-    mov     dword [rcx], 1                  ; Set number of channels to 1
+    mov     r8, rdi                         ; Data pointer to r8
+    mov     r9d, edx
 
-    xor     ecx, ecx                        ; Loop counter
+    pxor    xmm7, xmm7
 
-    mov     r9d, edx                        ; r9d upper bound for loop
-    imul    r9d, esi
-.cvt_pxls:
-    mov     rbx, rcx                        ; 3 channels => multiply pixel offset by 3
-    imul    rbx, 3
+    movdqa  xmm14, [threes]
+    pxor    xmm15, xmm15
 
-    mov     dil, byte [r8 + rbx]            ; Compute pixel mean
-    mov     sil, byte [r8 + rbx + 1]
-    mov     dl,  byte [r8 + rbx + 2]
+    imul    esi, edx                        ; Number of pixels
+    mov     eax, esi
+    xor     edx, edx
+    mov     ebx, 4
+    idiv    ebx
 
-    call    mean3
-    mov     byte [r8 + rcx], al             ; Write byte
+    xor     ecx, ecx
+    xor     esi, esi
 
-    inc     ecx
-    cmp     ecx, r9d
-    jl      .cvt_pxls
+.cvt_batch:
+    movdqu  xmm0, [r8 + rcx]
+    movdqa  xmm1, xmm0
+    movdqa  xmm2, xmm0
+    psrldq  xmm1, 1
+    psrldq  xmm2, 2
+
+    movdqa  xmm3, xmm0                      ; Preserve data
+    movdqa  xmm4, xmm1
+    movdqa  xmm5, xmm2
+
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    punpcklbw   xmm1, xmm15
+    punpcklbw   xmm2, xmm15
+
+    paddw   xmm0, xmm1
+    paddw   xmm0, xmm2
+
+    movdqa  xmm6, xmm0                      ; Preserve data
+
+    punpcklwd   xmm0, xmm15                 ; Low words to single precision float
+    cvtdq2ps    xmm0, xmm0
+
+    divps   xmm0, xmm14
+    cvtps2dq    xmm0, xmm0                  ; Back to dword
+
+    pextrb  ebx, xmm0, 0                    ; First two bytes to lower bytes in xmm7
+    pinsrb  xmm7, ebx, 0
+
+    pextrb  ebx, xmm0, 12
+    pinsrb  xmm7, ebx, 1
+
+    movdqa  xmm0, xmm6                      ; Restore words
+    punpckhwd   xmm0, xmm15                 ; High words to single precision float
+    cvtdq2ps    xmm0, xmm0
+
+    divps   xmm0, xmm14
+    cvtps2dq    xmm0, xmm0                  ; To dword
+
+    pextrb  ebx, xmm0, 8
+    pinsrb  xmm7, ebx, 2                    ; Next byte to byte 3 in xmm7
+
+    movdqa  xmm0, xmm3                      ; Restore bytes
+    movdqa  xmm1, xmm4
+    movdqa  xmm2, xmm5
+
+    punpckhbw   xmm0, xmm15                 ; Low bytes to words
+    punpckhbw   xmm1, xmm15
+    punpckhbw   xmm2, xmm15
+
+    paddw   xmm0, xmm1
+    paddw   xmm0, xmm2
+
+    punpcklwd   xmm0, xmm15                 ; To single precision float
+    cvtdq2ps    xmm0, xmm0
+
+    divps   xmm0, xmm14
+    cvtps2dq    xmm0, xmm0                  ; Divide and back to dword
+
+    pextrb  ebx, xmm0, 4                    ; Extract byte and store in byte 3 in xmm7
+    pinsrb  xmm7, ebx, 3
+
+    movd    ebx, xmm7
+
+    mov     dword [r8 + rsi], ebx           ; Write to memory
+
+    add     esi, 4
+    add     ecx, 12
+    dec     eax
+    jnz     .cvt_batch
+
+    cmp     edx, 0                          ; Done if there is no remainder
+    je      .done
+
+    mov     edi, edx
+    mov     r10d, 3
+
+.cvt_bytes:
+    xor     ax, ax
+    mov     al, byte [r8 + rcx]
+    mov     bl, byte [r8 + rcx + 1]
+    mov     dl, byte [r8 + rcx + 2]
+
+    add     ax, bx
+    add     ax, dx
+    xor     edx, edx
+    idiv    r10d
+    mov     byte [r8 + rsi], al
+
+    inc     esi
+    add     ecx, 3
+    dec     edi
+    jnz     .cvt_bytes
 
 .done:
     xor     eax, eax
 .epi:
     pop     rbx
-    ret
-
-; Compute the mean of 3 bytes
-; Params:
-;     dil: byte 1
-;     sil: byte 2
-;     dl:  byte 3
-; Return:
-;     al: mean of the inputs
-mean3:
-    xor     eax, eax                        ; Prepare eax
-
-    movzx   di, dil                         ; Zero extend (8-bit => 16-bit)
-    movzx   si, sil
-    movzx   dx, dl
-
-    mov     ax, di                          ; Compute mean
-    add     ax, si
-    add     ax, dx
-    xor     edx, edx                        ; Zero out rdx for division
-    mov     di, 3
-    div     di
-
     ret
