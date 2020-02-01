@@ -10,8 +10,6 @@
     global rad2deg
     global deg2rad
     global lerp
-    global imax
-    global imin
 
 ; Compute arctan(y/x)
 ; Params:
@@ -193,31 +191,5 @@ lerp:
     addss   xmm2, xmm1                      ; Add value of lower pixel
 
     cvtss2si    eax, xmm2                   ; Result to eax
-
-    ret
-
-; Compute max of two signed integers
-; Params:
-;     rdi: integer x
-;     rsi: integer y
-; Return:
-;     rax: max(x,y)
-imax:
-    mov     rax, rdi
-    cmp     rax, rsi
-    cmovl   rax, rsi
-
-    ret
-
-; Compute min of two signed integers
-; Params:
-;     rdi: integer x
-;     rsi: integer y
-; Return:
-;     rax: min(x,y)
-imin:
-    mov     rax, rdi
-    cmp     rsi, rax
-    cmovl   rax, rsi
 
     ret
