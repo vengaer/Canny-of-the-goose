@@ -467,6 +467,9 @@ hysteresis:
     dec     eax
     jnz     .copy_qwords
 
+    cmp     edx, 0                          ; Done copying if there is no remainder
+    je      .free
+
 .copy_bytes:
     mov     bl, byte [r9]
     mov     byte [r14], bl
