@@ -426,29 +426,27 @@ sobel:
 
     xor     edx, edx                        ; Number of bytes multiple of 4?
     mov     eax, ecx
-    mov     ebx, 4
+    mov     ebx, 8
     div     ebx
-    cmp     edx, 0
 
-    jne     .copy_bytewise                  ; Not multiple of 4, copy byte by byte
+    mov     r10, r9
+.copy_qwords:
+    mov     rbx, qword [r10]
+    mov     qword [r8], rbx
+    add     r8, 8
+    add     r10, 8
 
-    sub     ecx, 4                          ; Otherwise, multiple of 4, copy chunks of 32-bits
-.write_dword:
-    mov     ebx, dword [r9 + rcx]           ; Copy dwords
-    mov     dword [r8 + rcx], ebx
+    dec     eax
+    jnz     .copy_qwords
 
-    sub     ecx, 4
-    jnz     .write_dword
+.copy_bytes:
+    mov     bl, byte [r10]
+    mov     byte [r8], bl
+    inc     r8
+    inc     r10
 
-    jmp     .free
-
-.copy_bytewise:
-.write_byte:
-    mov     bl, byte [r9 + rcx]             ; Copy bytes
-    mov     byte [r8 + rcx], bl
-
-    dec     ecx
-    jnz     .write_byte
+    dec     edx
+    jnz     .copy_bytes
 
 .free:
     mov     rdi, r9                         ; Free malloc'd memory
