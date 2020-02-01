@@ -144,6 +144,9 @@ dbl_threshold:
     dec     eax
     jnz     .process_batch
 
+    cmp     edx, 0                          ; If no remaining bytes, jump to epilogue
+    je      .epi
+
 .process_single:                            ; Process remaining bytes (< 8)
     mov     bl, byte [r8]
     mov     cl, bl
