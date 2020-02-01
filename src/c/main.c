@@ -97,6 +97,14 @@ int main(int argc, char **argv) {
     dbl_threshold(texdata, width, height, 0.05f, 0.5f);
     printf("%-20s%d\n", "Double threshold:", 0); /* Cannot fail */
 
+    int hysteresis_status = hysteresis(texdata, width, height);
+    if(hysteresis_status) {
+        fprintf(stderr, "Edge tracking failed: %d\n", hysteresis_status);
+        stbi_image_free(texdata);
+        return 1;
+    }
+    printf("%-20s%d\n", "Edge tracking:", hysteresis_status);
+
     printf("Writing outfile %s\n", args.outfile);
     stbi_write_png(args.outfile, width, height, channels, texdata, width * sizeof(unsigned char));
     stbi_image_free(texdata);
