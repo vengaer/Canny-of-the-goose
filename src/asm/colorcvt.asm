@@ -88,7 +88,7 @@ rgb2grayscale:
     cvtps2dq    xmm0, xmm0                  ; To dword
 
     pextrb  ebx, xmm0, 8
-    pinsrb  xmm7, ebx, 2                    ; Next byte to byte 3 in xmm7
+    pinsrb  xmm7, ebx, 2                    ; Next byte to byte 2 in xmm7
 
     movdqa  xmm0, xmm3                      ; Restore bytes
     movdqa  xmm1, xmm4
