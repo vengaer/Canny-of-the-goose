@@ -33,6 +33,8 @@ hysteresis:
 
     mov     edi, esi                        ; Number of bytes to allocate
     imul    edi, edx
+    and     edi, -0x10
+    add     edi, 16
 
     call    malloc
 
@@ -448,7 +450,6 @@ hysteresis:
     pcmpgtb xmm9, xmm0                      ; Zero bits not to keep
 
     movdqu  [r9 + rcx], xmm9                ; Write to tmp address
-
 
     mov     eax, dword [rsp + .height]
     imul    eax, esi                        ; Total number of bytes
