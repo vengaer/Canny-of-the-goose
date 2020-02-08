@@ -2,3 +2,4 @@ build/**
 cotg*
 data/*
 !data/goose.jpg
+!data/goose_edge.png
