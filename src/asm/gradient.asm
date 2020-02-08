@@ -32,6 +32,8 @@ edgedetect:
 
     mov     edi, dword [rsi]                ; Number of bytes for angle array
     imul    edi, dword [rdx]
+    and     edi, -0x10                      ; Round up to multiple of 16
+    add     edi, 16
     imul    edi, 4
 
     call    malloc
