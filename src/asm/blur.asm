@@ -1,7 +1,9 @@
     section .rodata
 
     align 16
-    gauss_weights: dd 0.153388, 0.221461, 0.250301, 0.221461
+    wout: dd 0.153388, 0.153388, 0.153388, 0.153388
+    wmid: dd 0.221461, 0.221461, 0.221461, 0.221461
+    wcen: dd 0.250301, 0.250301, 0.250301, 0.250301
 
     section .text
     global gaussblur
@@ -9,205 +11,1501 @@
     extern malloc
     extern free
 
-; Gaussian blur using 5x5 convolution kernel
+; Gaussian blur using 5x5 filter kernel
 ; Params:
 ;     rdi: byte ptr to data, overwritten with output
 ;     esi: width in pixels
 ;     edx: height in pixels
 ; Return:
-;     eax: 0 on success, 1 on failure
+;     eax: 0 on success, 1 on malloc failure, 2 on unsuitable dims
 gaussblur:
 .data       equ 0
 .width      equ 8
 .height     equ 12
-.bvec       equ 16
-
     push    rbx
-    push    r12                             ; r12-15 used for preserving rsi, rdx, rcx and rax,
-    push    r13                             ; respectively, accross function calls
+    push    r12
+    push    r13
     push    r14
     push    r15
-    sub     rsp, 32
+    sub     rsp, 16
 
-    mov     qword [rsp + .data], rdi        ; Store data on stack
+    mov     eax, 2
+
+    cmp     esi, 16                         ; Must be at least 16 pixels wide
+    jl      .epi
+
+    cmp     edx, 5                          ; At least 5 pixels tall
+    jl      .epi
+
+    mov     qword [rsp + .data], rdi        ; Data to stack
     mov     dword [rsp + .width], esi
     mov     dword [rsp + .height], edx
 
-    mov     edi, esi                        ; Number of bytes to allocate
+    mov     edi, esi                        ; Number of bytes
     imul    edi, edx
 
     call    malloc
 
-    cmp     rax, 0
+    cmp     eax, 0
     jne     .malloc_succ
 
-    mov     eax, 1                          ; malloc failed, return 1
+    inc     eax
     jmp     .epi
 
 .malloc_succ:
-    mov     r9, rax                         ; tmp pointer to r9
+    mov     r9, rax                         ; Address of tmp array to r9
 
-    mov     r8, qword [rsp + .data]         ; data pointer to r8
-    mov     esi, dword [rsp + .width]       ; width back to esi
-    mov     edx, dword [rsp + .height]      ; height back to edx
+    mov     r8, qword [rsp + .data]         ; Data back to registers
+    mov     esi, dword [rsp + .width]
+    mov     edx, dword [rsp + .height]
+
+    mov     r11, r9
+
+    movdqa  xmm12, [wout]
+    movdqa  xmm13, [wmid]
+    movdqa  xmm14, [wcen]
+
+    pxor        xmm15, xmm15
 
 ; Horizontal pass
-    xor     ecx, ecx                        ; ecx counter for outer loop (rows)
-    mov     ebx, esi                        ; ebx upper bound for inner loop (cols)
-    sub     ebx, 2                          ; Avoid out-of-bounds access
+    mov     r10, r8
+    mov     ebx, edx                        ; Counter for number of rows
+
+    mov     r12d, esi
+    sub     r12d, 8                         ; 8 last bytes handled separately
 
 .hloop:
-    mov     r12d, esi
-    mov     r13d, edx
-    mov     r14d, ecx
+    movdqu  xmm0, [r10]                     ; First 8 bytes
+    movdqa  xmm1, xmm0
+    movdqa  xmm2, xmm0                      ; Third col of filter
+    movdqa  xmm3, xmm0
+    movdqa  xmm4, xmm0
+    pslldq  xmm0, 2                         ; First col of filter
+    pslldq  xmm1, 1                         ; Second col of filter
+    psrldq  xmm3, 1                         ; Fourth col of filter
+    psrldq  xmm4, 2                         ; Fifth col of filter
 
-    mov     rdi, r8                         ; Setup call (ecx already row idx)
-    mov     edx, esi
-    mov     rsi, r9
+    pextrb  eax, xmm0, 2                    ; Duplicate first byte (clamp)
+    pinsrb  xmm0, eax, 0
+    pinsrb  xmm0, eax, 1
+    pinsrb  xmm1, eax, 0
 
-    call    filter_outermost_cols
+; First col
+    movdqa  xmm5, xmm0                      ; Backup high bytes
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
 
-    mov     ecx, r14d
-    mov     edx, r13d
-    mov     esi, r12d
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply by weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
 
-    mov     eax, 2                          ; eax counter for inner loop
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    movaps  xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
 
-.hinner_loop:
-    mov     r10d, ecx                       ; Row idx
-    imul    r10d, esi                       ; Address offset of first pixel on current row
-    add     r10d, eax                       ; Address offset of current pixel
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    movaps  xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
 
-    mov     r12d, esi                       ; Preserve register values
-    mov     r13d, edx
-    mov     r14d, ecx
-    mov     r15d, eax
+; Second col
+    movdqa  xmm5, xmm1                      ; Backup high bytes
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
 
-    pxor    xmm0, xmm0
-    pxor    xmm1, xmm1
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
 
-    lea     rdi, [r8 + r10 + 2]             ; Pixel number 4 to be filtered
-    call    byte2ss
-    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
 
-    sub     rdi, 4                          ; Pixel 0 for filter
-    call    bvec2ps                         ; Pixels 0, 1, 2 and 3 in xmm0
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
 
-    call    apply_kernel                    ; al has pixel value
+; Third col
+    movdqa  xmm5, xmm2                      ; Backup high bytes
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
 
-    mov     byte [r9 + r10], al             ; Write byte to tmp array
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply by weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
 
-    mov     eax, r15d                       ; Restore registers
-    mov     ecx, r14d
-    mov     edx, r13d
-    mov     esi, r12d
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
 
-    inc     eax
-    cmp     eax, ebx                        ; ebx (cols - 2) upper limit for inner loop
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm14                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fourth col
+    movdqa  xmm5, xmm3                      ; Backup high bytes
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fifth col
+    movdqa  xmm5, xmm4                      ; Backup high bytes
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply by weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+
+    mov     rdi, r11
+
+    call    compressd2b_and_write12
+
+    mov     ecx, 12                         ; 12 bytes already processed
+
+.hinner_loop:                               ; Middle part of line
+    movdqu  xmm0, [r10 + rcx - 2]           ; First col of filter
+    movdqa  xmm1, xmm0
+    movdqa  xmm2, xmm0
+    movdqa  xmm3, xmm0
+    movdqa  xmm4, xmm0
+    psrldq  xmm1, 1                         ; Second col of filter
+    psrldq  xmm2, 2                         ; Third col of filter
+    psrldq  xmm3, 3                         ; Fourth col of filter
+    psrldq  xmm4, 4                         ; Fifth col of filter
+
+; First col
+    movdqa  xmm5, xmm0                      ; Backup high bytes
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply by weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    movaps  xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    movaps  xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Second col
+    movdqa  xmm5, xmm1                      ; Backup high bytes
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Third col
+    movdqa  xmm5, xmm2                      ; Backup high bytes
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply by weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm14                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fourth col
+    movdqa  xmm5, xmm3                      ; Backup high bytes
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fifth col
+    movdqa  xmm5, xmm4                      ; Backup high bytes
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply by weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+
+    lea     rdi, [r11 + rcx]
+
+    call    compressd2b_and_write12
+
+    add     ecx, 12                         ; Processing 12 bytes per iteration
+    cmp     ecx, r12d
     jl      .hinner_loop
 
-    inc     ecx
-    cmp     ecx, edx                        ; edx (rows) upper limit for outer loop
-    jl      .hloop
+    mov     ecx, esi
+    sub     ecx, 16                         ; Exactly 16 bytes until end of line
+
+    movdqu  xmm0, [r10 + rcx]               ; 16 last bytes of line
+    movdqa  xmm1, xmm0
+    movdqa  xmm2, xmm0
+    movdqa  xmm3, xmm0
+    movdqa  xmm4, xmm0
+    psrldq  xmm0, 2                         ; 14th byte from end of line
+    psrldq  xmm1, 3                         ; 13th byte from end of line
+    psrldq  xmm2, 4                         ; 12th byte from end of line
+    psrldq  xmm3, 5                         ; 11th byte from end of line
+    psrldq  xmm4, 6                         ; 10th byte from end of line
+
+    add     ecx, 4                          ; Increase ecx to correct write offset
+
+    pextrb  eax, xmm4, 9                    ; Duplicate last byte on line
+    pinsrb  xmm3, eax, 11
+    pinsrb  xmm4, eax, 10
+    pinsrb  xmm4, eax, 11
+
+; First col
+    movdqa  xmm5, xmm0                      ; Backup high bytes
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply by weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    movaps  xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    movaps  xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Second col
+    movdqa  xmm5, xmm1                      ; Backup high bytes
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Third col
+    movdqa  xmm5, xmm2                      ; Backup high bytes
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply by weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm14                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fourth col
+    movdqa  xmm5, xmm3                      ; Backup high bytes
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply by weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm13                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+; Fifth col
+    movdqa  xmm5, xmm4                      ; Backup high bytes
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply by weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply by weights
+    addps   xmm8, xmm6                      ; Sum bytes 4-7 in xmm8
+
+    punpckhbw   xmm5, xmm15                 ; High bytes to words
+    punpcklwd   xmm5, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm5, xmm5                  ; To single precision floats
+    mulps   xmm5, xmm12                     ; Multiply by weights
+    addps   xmm9, xmm5                      ; Sum bytes 8-11 in xmm9
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+
+    lea     rdi, [r11 + rcx]
+
+    call    compressd2b_and_write12
+
+
+    add     r10, rsi                        ; Advance to next row
+    add     r11, rsi
+    dec     ebx
+    jnz     .hloop
 
 ; Vertical pass
-    xor     ecx, ecx                        ; ecx counter for outer loop (cols)
-    mov     ebx, edx                        ; ebx upper bound for inner loop (rows)
-    sub     ebx, 2
+    mov     r10, r8                         ; Address of output
+    mov     r11, r9                         ; First row of filter
+    mov     r12, r9                         ; Second row of filter
+    mov     r13, r9                         ; Third row of filter
+    lea     r14, [r9 + rsi]                 ; Fourth row of filter
+    lea     r15, [r9 + 2 * rsi]             ; Fifth row of filter
+
+    xor     ecx, ecx
+.tr_loop:                                   ; Top row
+    movdqu  xmm0, [r11 + rcx]
+    movdqa  xmm1, xmm0                      ; r11, r12 and r13 same address
+    movdqa  xmm2, xmm0
+    movdqu  xmm3, [r14 + rcx]
+    movdqu  xmm4, [r15 + rcx]
+
+; First row (counting clamped rows)
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
+
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
+    add     ecx, 16                         ; Processing 16 bytes per iteration
+    cmp     ecx, esi
+    jl      .tr_loop
+
+    add     r10, rsi                        ; Advance to next row
+    add     r13, rsi
+    add     r14, rsi
+    add     r15, rsi
+
+    xor     ecx, ecx
+.str_loop:                                  ; Second row from top
+    movdqu  xmm0, [r11 + rcx]
+    movdqa  xmm1, xmm0                      ; r11 and r12 same address
+    movdqu  xmm2, [r13 + rcx]
+    movdqu  xmm3, [r14 + rcx]
+    movdqu  xmm4, [r15 + rcx]
+
+; First row
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
+
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
+    add     ecx, 16                         ; Processing 16 bytes per iteration
+    cmp     ecx, esi
+    jl      .str_loop
+
+    add     r10, rsi                        ; Advance to next row
+    add     r12, rsi
+    add     r13, rsi
+    add     r14, rsi
+    add     r15, rsi
+
+    sub     edx, 4                          ; 2 top and 2 bottom rows handled separately
 
 .vloop:
-    mov     r12d, esi                       ; Preserve registers
-    mov     r13d, edx
-    mov     r14d, ecx
-    mov     r15, r8
+    xor     ecx, ecx
+.vinner_loop:                               ; Third to third from last rows
+    movdqu  xmm0, [r11 + rcx]
+    movdqu  xmm1, [r12 + rcx]
+    movdqu  xmm2, [r13 + rcx]
+    movdqu  xmm3, [r14 + rcx]
+    movdqu  xmm4, [r15 + rcx]
 
-    mov     rdi, r9                         ; Setup call
-    mov     r11d, esi
-    mov     rsi, r8
-    mov     r8d, ecx
-    mov     ecx, edx
-    mov     edx, r11d
+; First row
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
 
-    call    filter_outermost_rows
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
 
-    mov     r8, r15                         ; Restore registers
-    mov     ecx, r14d
-    mov     edx, r13d
-    mov     esi, r12d
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
 
-    mov     eax, 2                          ; eax counter for inner loop
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
 
-.vinner_loop:
-    mov     r10d, eax
-    add     r10d, 2                         ; Row idx of pixel 4 in filter
-    imul    r10d, esi                       ; Address offset of first pixel of row of pixel 4
-    add     r10d, ecx                       ; Address offset of pixel 4
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
 
-    mov     r12d, esi                       ; Preserve esi accross call
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
 
-    pxor    xmm0, xmm0
-    pxor    xmm1, xmm1
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
 
-    lea     rdi, [r9 + r10]                 ; Address of pixel 4
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 holds pixel 4
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
 
-    mov     esi, r12d                       ; Restore esi
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
 
-    xor     r11d, r11d
-    sub     r10d, esi                       ; Move up one row
-    mov     r11b, byte [r9 + r10]           ; Pixel 3 for filter will be in most significant byte
-    shl     r11d, 8                         ; of r11d
-    sub     r10d, esi                       ; Up one row
-    mov     r11b, byte [r9 + r10]           ; Pixel 2 in second most significant byte
-    shl     r11d, 8
-    sub     r10d, esi                       ; Up one row
-    mov     r11b, byte [r9 + r10]           ; Pixel 1 in second least significant byte
-    shl     r11d, 8
-    sub     r10d, esi                       ; Up a row
-    mov     r11b, byte [r9 + r10]           ; Pixel 0 in least significant byte
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
 
-    add     r10d, esi                       ; Address offset of current output pixel
-    add     r10d, esi
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
 
-    mov     dword [rsp + .bvec], r11d       ; Write to stack
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
 
-    lea     rdi, [rsp + .bvec]              ; Address of byte array on stack
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
 
-    mov     r13d, edx
-    mov     r14d, ecx                       ; Preserve registers
-    mov     r15d, eax
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
 
-    mov     r12d, esi                       ; Preserve esi
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
 
-    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
 
-    call    apply_kernel                    ; al has pixel value
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
 
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
 
-    mov     esi, r12d                       ; Restore esi
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
 
-    mov     byte [r8 + r10], al             ; Write byte
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
 
-    mov     eax, r15d                       ; Restore registers
-    mov     ecx, r14d
-    mov     edx, r13d
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
 
-    inc     eax
-    cmp     eax, ebx                        ; ebx (rows - 2) upper bound for inner loop
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
+    add     ecx, 16                         ; Processing 16 bytes per iteration
+    cmp     ecx, esi
     jl      .vinner_loop
 
-    inc     ecx
-    cmp     ecx, esi                        ; esi (width) upper bound for outer loop
-    jl      .vloop
+    add     r10, rsi                        ; Advance to next row
+    add     r11, rsi
+    add     r12, rsi
+    add     r13, rsi
+    add     r14, rsi
+    add     r15, rsi
+    dec     edx
+    jnz     .vloop
+
+    xor     ecx, ecx
+.slr_loop:                                  ; Second row from bottom
+    movdqu  xmm0, [r11 + rcx]
+    movdqu  xmm1, [r12 + rcx]
+    movdqu  xmm2, [r13 + rcx]
+    movdqu  xmm3, [r14 + rcx]
+    movdqa  xmm4, xmm3                      ; xmm3 and xmm4 same address
+
+; First row
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
+
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
+    add     ecx, 16                         ; Processing 16 bytes per iteration
+    cmp     ecx, esi
+    jl      .slr_loop
+
+    add     r10, rsi                        ; Advance to next row
+
+    sub     esi, 16                         ; Prevent out-of-bounds access
+    xor     ecx, ecx
+.lr_loop:                                   ; Last row
+    movdqu  xmm0, [r12 + rcx]
+    movdqu  xmm1, [r13 + rcx]
+    movdqu  xmm2, [r14 + rcx]               ; xmm2, xmm3 and xmm4 same address
+    movdqa  xmm3, xmm2
+    movdqa  xmm4, xmm3
+
+; First row
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
+
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
+    add     ecx, 16                         ; Processing 16 bytes per iteration
+    cmp     ecx, esi
+    jl      .lr_loop
+
+    mov     ecx, esi                        ; Exactly 16 bytes left on row
+    movdqu  xmm0, [r12 + rcx]
+    movdqu  xmm1, [r13 + rcx]
+    movdqu  xmm2, [r14 + rcx]               ; xmm2, xmm3 and xmm4 same address
+    movdqa  xmm3, xmm2
+    movdqa  xmm4, xmm3
+
+; First row
+    movdqa  xmm5, xmm0                      ; Backup high bytes in first row
+    punpcklbw   xmm0, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm0                      ; Backup high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm7, xmm0                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm0, xmm5                      ; Restore bytes
+    punpckhbw   xmm0, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm0                      ; Preserve high words
+
+    punpcklwd   xmm0, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm0, xmm0                  ; To single precision float
+    mulps   xmm0, xmm12                     ; Multiply with weights
+    movaps  xmm9, xmm0                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    movaps  xmm10, xmm6                     ; Sum bytes 12-15 in xmm10
+
+; Second row
+    movdqa  xmm5, xmm1                      ; Backup high bytes in second row
+    punpcklbw   xmm1, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm1                      ; Backup high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm1                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm1, xmm5                      ; Restore bytes
+    punpckhbw   xmm1, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm1                      ; Preserve high words
+
+    punpcklwd   xmm1, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm1, xmm1                  ; To single precision float
+    mulps   xmm1, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm1                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Third row
+    movdqa  xmm5, xmm2                      ; Backup high bytes in third row
+    punpcklbw   xmm2, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm2                      ; Backup high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm7, xmm2                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm2, xmm5                      ; Restore bytes
+    punpckhbw   xmm2, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm2                      ; Preserve high words
+
+    punpcklwd   xmm2, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm2, xmm2                  ; To single precision float
+    mulps   xmm2, xmm14                     ; Multiply with weights
+    addps   xmm9, xmm2                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm14                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fourth row
+    movdqa  xmm5, xmm3                      ; Backup high bytes in fourth row
+    punpcklbw   xmm3, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm3                      ; Backup high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm7, xmm3                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm3, xmm5                      ; Restore bytes
+    punpckhbw   xmm3, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm3                      ; Preserve high words
+
+    punpcklwd   xmm3, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm3, xmm3                  ; To single precision float
+    mulps   xmm3, xmm13                     ; Multiply with weights
+    addps   xmm9, xmm3                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm13                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+; Fifth row
+    movdqa  xmm5, xmm4                      ; Backup high bytes in fourth row
+    punpcklbw   xmm4, xmm15                 ; Low bytes to words
+    movdqa  xmm6, xmm4                      ; Backup high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm7, xmm4                      ; Sum bytes 0-3 in xmm7
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps   xmm8, xmm6                      ; Sum of bytes 4-7 in xmm8
+
+    movdqa  xmm4, xmm5                      ; Restore bytes
+    punpckhbw   xmm4, xmm15                 ; High bytes to words
+    movdqa  xmm6, xmm4                      ; Preserve high words
+
+    punpcklwd   xmm4, xmm15                 ; Low words to dwords
+    cvtdq2ps    xmm4, xmm4                  ; To single precision float
+    mulps   xmm4, xmm12                     ; Multiply with weights
+    addps   xmm9, xmm4                      ; Sum of bytes 8-11 in xmm9
+
+    punpckhwd   xmm6, xmm15                 ; High words to dwords
+    cvtdq2ps    xmm6, xmm6                  ; To single precision float
+    mulps   xmm6, xmm12                     ; Multiply with weights
+    addps  xmm10, xmm6                      ; Sum bytes 12-15 in xmm10
+
+    cvtps2dq    xmm0, xmm7
+    cvtps2dq    xmm1, xmm8
+    cvtps2dq    xmm2, xmm9
+    cvtps2dq    xmm3, xmm10
+
+    lea     rdi, [r10 + rcx]
+
+    call    compressd2b_and_write16
+
 
 .free:
-    mov     rdi, r9                         ; Free malloc'd memory
+    mov     rdi, r9
     call    free
 
-    xor     eax, eax                        ; Return 0
+    xor     eax, eax
 .epi:
-    add     rsp, 32
+    add     rsp, 16
     pop     r15
     pop     r14
     pop     r13
@@ -215,328 +1513,115 @@ gaussblur:
     pop     rbx
     ret
 
-; Filter 2 leftmost and 2 rightmost pixels in row
+; Compress 12 dwords stored in xmm0:xmm1:xmm2 to bytes and write to address in rdi
 ; Params:
-;     rdi: data pointer (first pixel in pixel array)
-;     rsi: destination pointer (first pixel in pixel array)
-;     edx: width in pixels
-;     ecx: row index
+;     rdi: address to which data should be written
+;     xmm0(packed single precision): dwords 0-3
+;     xmm1(packed single precision): dwords 4-7
+;     xmm2(packed single precision): dwords 8-11
 ; Return:
 ;     -
-filter_outermost_cols:
-.src        equ 0
-.dst        equ 8
-.width      equ 16
-.row        equ 20
-.bvec       equ 24
-.pxls       equ 28
-    sub     rsp, 32
+compressd2b_and_write12:
+    pextrb  eax, xmm0, 0
+    pinsrb  xmm3, eax, 0
 
-    mov     dword [rsp + .width], edx       ; Write width and height to stack
-    mov     dword [rsp + .row], ecx
+    pextrb  eax, xmm0, 4
+    pinsrb  xmm3, eax, 1
 
-    imul    edx, ecx                        ; ecx has address offset to first pixel in row
-    add     rdi, rdx                        ; Address of first pixel in row in src
-    add     rsi, rdx                        ; Address of first pixel on row in dst
+    pextrb  eax, xmm0, 8
+    pinsrb  xmm3, eax, 2
 
-    mov     qword [rsp + .src], rdi         ; Write addresses to stack
-    mov     qword [rsp + .dst], rsi
+    pextrb  eax, xmm0, 12
+    pinsrb  xmm3, eax, 3
 
-; First pixel
-    mov     cx, word [rdi]                  ; Only 2 pixels used for first 4 bytes in kernel
-    mov     byte [rsp + .bvec], ch
-    mov     byte [rsp + .bvec + 1], ch
-    mov     word [rsp + .bvec + 2], cx
+    pextrb  eax, xmm1, 0
+    pinsrb  xmm3, eax, 4
 
-    add     rdi, 2                          ; Pixel 4 for filter
-    mov     cl, byte [rdi]
-    mov     byte [rsp + .pxls + 3], cl      ; Store pixel value on stack (use last byte of pxls since it's not used yet)
+    pextrb  eax, xmm1, 4
+    pinsrb  xmm3, eax, 5
 
-    pxor    xmm0, xmm0
-    pxor    xmm1, xmm1
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 has  pixel 4
+    pextrb  eax, xmm1, 8
+    pinsrb  xmm3, eax, 6
 
-    lea     rdi, [rsp + .bvec]
-    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
+    pextrb  eax, xmm1, 12
+    pinsrb  xmm3, eax, 7
 
-    call    apply_kernel                    ; al has resulting byte
+    pextrb  eax, xmm2, 0
+    pinsrb  xmm3, eax, 8
 
-    mov     byte [rsp + .pxls], al          ; Write result to stack for now
+    pextrb  eax, xmm2, 4
+    pinsrb  xmm3, eax, 9
 
-; Second pixel
-    mov     ecx, dword [rsp + .bvec]        ; Shift byte array 1 byte to the left
-    shl     ecx, 8
-    mov     cl, byte [rsp + .pxls + 3]      ; byte 3 for filter
-    mov     dword [rsp + .bvec], ecx        ; Write back to stack
+    pextrb  eax, xmm2, 8
+    pinsrb  xmm3, eax, 10
 
-    mov     rdi, qword [rsp + .src]
-    add     rdi, 3                          ; Pixel 4 for filter
+    pextrb  eax, xmm2, 12
+    pinsrb  xmm3, eax, 11
 
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+    movq    qword [rdi], xmm3
+    psrldq  xmm3, 8
+    movd    dword [rdi + 8], xmm3
 
-    lea     rdi, [rsp + .bvec]
-    call    bvec2ps                         ; xmm0 has pixels 0, 1, 2 and 3
-
-    call    apply_kernel
-    mov     byte [rsp + .pxls + 1], al      ; Write to stack
-
-; Second to last pixel
-    mov     rsi, qword [rsp + .src]         ; First byte in row
-    mov     edx, dword [rsp + .width]
-    lea     rdi, [rsi + rdx - 1]            ; Address of last pixel on row
-
-    mov     qword [rsp + .src], rdi         ; Write pixel address to stack
-
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 has pixel 4
-
-    sub     rdi, 3                          ; rdi first pixel to be filtered
-
-    mov     edx, dword [rdi]                ; Copy 4 bytes to stack
-    mov     dword [rsp + .bvec], edx
-
-    lea     rdi, [rsp + .bvec]
-
-    call    bvec2ps
-
-    call    apply_kernel
-    mov     byte [rsp + .pxls + 2], al
-
-; Last pixel
-    mov     rdi, qword [rsp + .src]         ; Last pixel to rdi
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 has pixel 4
-
-    mov     edx, dword [rsp + .bvec]        ; load bytes to edx
-    mov     cl, dl                          ; Preserve rightmost byte over shift
-    shl     edx, 8                          ; Shift out most significant byte
-    mov     dl, cl                          ; Write back least significant byte
-    mov     dword [rsp + .bvec], edx
-
-    lea     rdi, [rsp + .bvec]              ; Address of byte array
-
-    call    bvec2ps
-
-    call    apply_kernel
-
-; Write to dst
-    mov     rsi, qword [rsp + .dst]         ; Load dst pointer
-
-    mov     cx, word [rsp + .pxls]          ; Write two leftmost pixels
-    mov     word [rsi], cx
-
-    mov     edx, dword [rsp + .width]       ; Load width
-    add     rsi, rdx
-    lea     rdi, [rsi + rdx - 2]            ; Address of second to last pixel on line
-    mov     ah, byte [rsp + .pxls + 2]      ; Second to last pixel to ah, al still has last byte
-    mov     word [rdi], ax                  ; Write two leftmost bytes
-
-    add     rsp, 32
     ret
 
-; Filter 2 topmost and 2 bottommost pixels in column
+; Compress 16 dwords stored in xmm0:xmm1:xmm2:xmm3 to bytes and write to address in rdi
 ; Params:
-;     rdi: data pointer (first pixel in pixel array)
-;     rsi: destination pointer (first pixel in pixel array)
-;     edx: width in pixels
-;     ecx: height in pixels
-;     r8d: column index
+;     rdi: address to which data should be written
+;     xmm0(packed single precision): dwords 0-3
+;     xmm1(packed single precision): dwords 4-7
+;     xmm2(packed single precision): dwords 8-11
+;     xmm3(packed single precision): dwords 12-15
 ; Return:
 ;     -
-filter_outermost_rows:
-.src        equ 0
-.dst        equ 8
-.width      equ 16
-.height     equ 20
-.bvec       equ 24
-.pxls       equ 28
-    sub     rsp, 32
+compressd2b_and_write16:
+    pextrb  eax, xmm0, 0
+    pinsrb  xmm4, eax, 0
 
-    mov     dword [rsp + .width], edx
-    mov     dword [rsp + .height], ecx
+    pextrb  eax, xmm0, 4
+    pinsrb  xmm4, eax, 1
 
-    add     rdi, r8
-    mov     qword [rsp + .src], rdi         ; Address of pixel on first row in input
+    pextrb  eax, xmm0, 8
+    pinsrb  xmm4, eax, 2
 
-    add     rsi, r8
-    mov     qword [rsp + .dst], rsi         ; Address of pixel on first row in output
+    pextrb  eax, xmm0, 12
+    pinsrb  xmm4, eax, 3
 
-; First pixel
-    mov     ch, byte [rdi]                  ; Pixel in first row
-    mov     cl, byte [rdi + rdx]            ; Pixel in second row
-    mov     byte [rsp + .bvec], ch          ; Pixel from first row to first, second and third
-    mov     byte [rsp + .bvec + 1], ch      ; values for kernel, second row to fourth
-    mov     word [rsp + .bvec + 2], cx
+    pextrb  eax, xmm1, 0
+    pinsrb  xmm4, eax, 4
 
-    lea     rdi, [rdi + 2 * rdx]            ; Address of 3rd row from the top
+    pextrb  eax, xmm1, 4
+    pinsrb  xmm4, eax, 5
 
-    mov     cl, byte [rdi]
-    mov     byte [rsp + .pxls + 3], cl      ; Store pixel 4 on stack
+    pextrb  eax, xmm1, 8
+    pinsrb  xmm4, eax, 6
 
-    pxor    xmm0, xmm0
-    pxor    xmm1, xmm1
-    call    byte2ss
-    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
+    pextrb  eax, xmm1, 12
+    pinsrb  xmm4, eax, 7
 
-    lea     rdi, [rsp + .bvec]
+    pextrb  eax, xmm2, 0
+    pinsrb  xmm4, eax, 8
 
-    call    bvec2ps
+    pextrb  eax, xmm2, 4
+    pinsrb  xmm4, eax, 9
 
-    call    apply_kernel
+    pextrb  eax, xmm2, 8
+    pinsrb  xmm4, eax, 10
 
-    mov     byte [rsp + .pxls], al          ; First resulting byte to stack
+    pextrb  eax, xmm2, 12
+    pinsrb  xmm4, eax, 11
 
-; Second pixel
-    mov     ecx, dword [rsp + .bvec]        ; Shift kernel one step down
-    shl     ecx, 8
-    mov     cl, byte [rsp + .pxls + 3]      ; Fourth pixel
-    mov     dword [rsp + .bvec], ecx        ; Write back to stack
+    pextrb  eax, xmm3, 0
+    pinsrb  xmm4, eax, 12
 
-    mov     rdi, qword [rsp + .src]
-    mov     edx, dword [rsp + .width]
+    pextrb  eax, xmm3, 4
+    pinsrb  xmm4, eax, 13
 
-    imul    edx, 3
-    lea     rdi, [rdi + rdx]                ; Address to pixel 4
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; xmm1 has pixel 4
+    pextrb  eax, xmm3, 8
+    pinsrb  xmm4, eax, 14
 
-    lea     rdi, [rsp + .bvec]
-    call    bvec2ps
+    pextrb  eax, xmm3, 12
+    pinsrb  xmm4, eax, 15
 
-    call    apply_kernel
-
-    mov    byte [rsp + .pxls + 1], al       ; Write resulting byte to stack
-
-; Second to last pixel
-
-    mov     rdi, qword [rsp + .src]
-    mov     edx, dword [rsp + .width]
-    mov     ecx, dword [rsp + .height]
-    sub     ecx, 4
-    imul    ecx, edx                        ; Offset of pixel on first row of kernel
-    add     rdi, rcx                        ; Address of pixel on first row of kernel
-
-    xor     r8d, r8d
-
-    mov     r8b, byte [rdi]                 ; Move bytes in column to r8d
-    shl     r8d, 8
-    mov     r8b, byte [rdi + rdx]
-    shl     r8d, 8
-    mov     r8b, byte [rdi + 2 * rdx]
-    shl     r8d, 8
-    imul    rdx, 3                          ; Advance rdi 3 lines
-    add     rdi, rdx
-    mov     r8b, byte [rdi]                 ; Move last byte to r8d
-
-    mov     dword [rsp + .bvec], r8d        ; Write bytes to stack
-
-    mov     qword [rsp + .src], rdi         ; Address of pixel in last row to stack
-
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
-
-
-    lea     rdi, [rsp + .bvec]
-    call    bvec2ps
-
-    call    apply_kernel
-
-    mov     byte [rsp + .pxls + 2], al      ; Result to stack
-
-; Last pixel
-    mov     rdi, qword [rsp + .src]         ; Address of pixel in last row
-
-    pxor    xmm0, xmm0
-    call    byte2ss
-    movss   xmm1, xmm0                      ; Pixel 4 in xmm1
-
-    mov     edx, dword [rsp + .bvec]
-    mov     cl, dl                          ; Preserve lowest byte over shift
-    shl     edx, 8                          ; Move kernel to the right
-    mov     dl, cl                          ; Restore lowest byte
-    mov     dword [rsp + .bvec], edx
-
-    lea     rdi, [rsp + .bvec]              ; Address of byte array
-
-    call    bvec2ps
-
-    call    apply_kernel
-
-    mov     ah, [rsp + .pxls + 2]           ; al already has last byte
-
-    mov     rsi, qword [rsp + .dst]
-    mov     edx, dword [rsp + .width]
-    mov     edi, dword [rsp + .height]
-
-    mov     cx, word [rsp + .pxls]
-    mov     byte [rsi], ch                  ; Byte to first row
-    mov     byte[rsi + rdx], cl             ; Byte to second row
-
-    sub     edi, 2
-    imul    edi, edx
-    add     rsi, rdi                        ; Address of pixel in second to last row
-    mov     byte [rsi], ah                  ; Byte to second to last row
-    mov     byte [rsi + rdx], al            ; Byte to last row
-
-    add     rsp, 32
-    ret
-
-; Convert 4 consecutive bytes to packed single precision floating point
-; Params:
-;     rdi: byte pointer to data (at least 4 bytes)
-; Return:
-;     xmm0 (packed single precision): zero extended data converted to packed single precision float
-bvec2ps:
-    pxor    xmm0, xmm0                      ; Zero out xmm0
-    pxor    xmm1, xmm1
-    movd    xmm0, dword [rdi]               ; Bytes to xmm0
-    punpcklbw   xmm0, xmm1                  ; Unpack and interleave with xmm1 (zero extend each byte to word)
-    punpcklwd   xmm0, xmm1                  ; Zero extend words to dwords, xmm0 now packed with 32 bit ints
-
-    cvtdq2ps    xmm0, xmm0                  ; Convert to single precision float
+    movdqu  [rdi], xmm4
 
     ret
-
-; Convert single byte to scalar single precision floating point
-; Params:
-;     rdi: byte pointer to data (at least one byte)
-; Return:
-;     xmm0 (scalar single precision): zero extended data converted to scalar single precision float
-byte2ss:
-    movzx   esi, byte [rdi]                 ; Read byte and zero extend
-    pxor    xmm0, xmm0
-    cvtsi2ss    xmm0, esi
-    ret
-
-; Apply gaussian kernel
-; Params:
-;     xmm0 (packed single precision): pixels 0, 1, 2, and 3
-;     xmm1 (scalar single precision): pixel 4
-; Return:
-;     al: value returned from kernel
-apply_kernel:
-    mulps   xmm0, [gauss_weights]           ; Multiply pixels 0-3 (SSE)
-
-    pxor    xmm2, xmm2
-    movss   xmm2, dword [gauss_weights]     ; Load only first weight to xmm2
-    mulss   xmm1, xmm2                      ; Multiply pixel 4 with weight 4 (weight 4 == weight 0)
-
-    movaps  xmm2, xmm0                      ; Copy xmm0 to xmm2 and shift right 8 bytes
-    psrldq  xmm2, 8
-
-    addps   xmm0, xmm2                      ; Add upper half of xmm0 (now in xmm2) to lower half
-
-    addss   xmm1, xmm0                      ; Accumulate in xmm1
-    psrldq  xmm0, 4
-    addss   xmm1, xmm0
-
-    cvtss2si    eax, xmm1
-    ret
-
