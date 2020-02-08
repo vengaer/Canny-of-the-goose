@@ -475,26 +475,14 @@ sobel:
 ; Return:
 ;     eax: 0 on success, 1 on failure
 non_max_suppression:
-.data       equ 0
-.width      equ 8
-.height     equ 12
-.angles     equ 16
-.fstride    equ 24
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 32
-
-    mov     qword [rsp + .data], rdi        ; Parameters to stack
-    mov     dword [rsp + .width], esi
-    mov     dword [rsp + .height], edx
-    mov     qword [rsp + .angles], rcx
 
     mov     r8d, esi
     imul    r8d, 4
-    mov     dword [rsp + .fstride], r8d     ; Number of bytes in a single row of floats
 
     mov     r9, rcx                         ; Address of first float in second row
     add     r9, r8
@@ -770,7 +758,6 @@ non_max_suppression:
 
     xor     eax, eax
 .epi:
-    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
