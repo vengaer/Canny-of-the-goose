@@ -9,8 +9,8 @@ Supports grayscale and RGB images, no support for RGBA. The algorithm is outline
 ### Example
 
 <p float="left">
-    <img src="data/goose.jpg" width="400" />
-    <img src="data/goose_edge.png" width="400" />
+    <img src="data/goose.jpg" width="500" />
+    <img src="data/goose_edge.png" width="500" />
 </p>
 
 Image courtesy of Pixabay and available [here](https://www.pexels.com/photo/nature-bird-river-head-66863/).
