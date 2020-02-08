@@ -27,7 +27,7 @@ Image courtesy of Pixabay and available [here](https://www.pexels.com/photo/natu
 - [stb image](https://github.com/nothings/stb)[^2] -- *for reading and writing images*
 
 ### Credits
-- The sobel function is partly based on a chapter in [Introduction to 64 Bit Assembly Language Programming for Linux and OS X](https://www.rayseyfarth.com/asm/index.html) by Ray Seyfarth.
+- The sobel function is partly based on a chapter in [Introduction to 64 Bit Assembly Language Programming for Linux and OS X](https://www.rayseyfarth.com/asm/index.html) by Ray Seyfarth
 - stb written by Sean Barrett et.<span></span>al., see [this](https://github.com/nothings/stb/graphs/contributors) for the full list of contributors
 
 ### Footnotes
