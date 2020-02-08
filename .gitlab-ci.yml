@@ -1,7 +1,7 @@
 image: archlinux/base:latest
 
 before_script:
-    - pacman --noconfirm --needed -Syu gcc nasm make
+    - pacman --noconfirm --needed -Syu gcc nasm make clang
 
 stages:
     - build
@@ -10,4 +10,10 @@ gcc:
     stage: build
     script:
     - export CC=gcc
+    - make
+
+clang:
+    stage: build
+    script:
+    - export CC=clang
     - make
