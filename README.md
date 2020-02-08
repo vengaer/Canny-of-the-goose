@@ -32,4 +32,4 @@ Image courtesy of Pixabay and available [here](https://www.pexels.com/photo/natu
 
 ### Footnotes
 [^1]: Most at least somewhat modern Intel and AMD processors do  
-[^2]: Required files included in the include directory
+[^2]: Required files included in the [include](include) directory
