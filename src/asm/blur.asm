@@ -578,9 +578,9 @@ process_vertical_batch:
 ; Compress 12 dwords stored in xmm0:xmm1:xmm2 to bytes and write to address in rdi
 ; Params:
 ;     rdi: address to which data should be written
-;     xmm0(packed single precision): dwords 0-3
-;     xmm1(packed single precision): dwords 4-7
-;     xmm2(packed single precision): dwords 8-11
+;     xmm0(packed dwords): dwords 0-3
+;     xmm1(packed dwords): dwords 4-7
+;     xmm2(packed dwords): dwords 8-11
 ; Return:
 ;     -
 compressd2b_and_write12:
@@ -629,10 +629,10 @@ compressd2b_and_write12:
 ; Compress 16 dwords stored in xmm0:xmm1:xmm2:xmm3 to bytes and write to address in rdi
 ; Params:
 ;     rdi: address to which data should be written
-;     xmm0(packed single precision): dwords 0-3
-;     xmm1(packed single precision): dwords 4-7
-;     xmm2(packed single precision): dwords 8-11
-;     xmm3(packed single precision): dwords 12-15
+;     xmm0(packed dwords): dwords 0-3
+;     xmm1(packed dwords): dwords 4-7
+;     xmm2(packed dwords): dwords 8-11
+;     xmm3(packed dwords): dwords 12-15
 ; Return:
 ;     -
 compressd2b_and_write16:
