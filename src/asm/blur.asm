@@ -61,9 +61,9 @@ gaussblur:
 
     mov     r11, r9
 
-    movdqa  xmm12, [wout]
-    movdqa  xmm13, [wmid]
-    movdqa  xmm14, [wcen]
+    movaps  xmm12, [wout]
+    movaps  xmm13, [wmid]
+    movaps  xmm14, [wcen]
 
     pxor        xmm15, xmm15
 
