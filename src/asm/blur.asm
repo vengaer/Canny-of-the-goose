@@ -48,7 +48,7 @@ gaussblur:
 
     call    malloc
 
-    cmp     eax, 0
+    cmp     rax, 0
     jne     .malloc_succ
 
     inc     eax

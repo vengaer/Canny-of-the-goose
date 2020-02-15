@@ -38,7 +38,7 @@ edgedetect:
 
     call    malloc
 
-    cmp     eax, 0
+    cmp     rax, 0
     jne     .malloc_succ
 
     inc     eax
@@ -127,7 +127,7 @@ sobel:
 
     call    malloc
 
-    cmp     eax, 0
+    cmp     rax, 0
     jne     .malloc_succ
 
     inc     eax                             ; return 1
