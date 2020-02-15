@@ -121,32 +121,9 @@ dbl_threshold:
 
     por     xmm2, xmm5                      ; Combine high and low values
 
-    xor     ecx, ecx
-    pextrb  ebx, xmm2, 14                   ; Low byte of each word in xmm2 to rcx
-    mov     cl, bl
-    shl     ecx, 8
-    pextrb  ebx, xmm2, 12
-    mov     cl, bl
-    shl     ecx, 8
-    pextrb  ebx, xmm2, 10
-    mov     cl, bl
-    shl     ecx, 8
-    pextrb  ebx, xmm2, 8
-    mov     cl, bl
-    shl     rcx, 8
-    pextrb  ebx, xmm2, 6
-    mov     cl, bl
-    shl     rcx, 8
-    pextrb  ebx, xmm2, 4
-    mov     cl, bl
-    shl     rcx, 8
-    pextrb  ebx, xmm2, 2
-    mov     cl, bl
-    shl     rcx, 8
-    pextrb  ebx, xmm2, 0
-    mov     cl, bl
+    packuswb    xmm2, xmm15                 ; Words to bytes
 
-    mov     qword [r8], rcx                 ; Write to memory
+    movq     qword [r8], xmm2               ; Write to memory
 
     add     r8, 8                           ; Processing 8 bytes per iteration
     dec     eax

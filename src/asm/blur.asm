@@ -43,6 +43,8 @@ gaussblur:
 
     mov     edi, esi                        ; Number of bytes
     imul    edi, edx
+    and     edi, -0x10                      ; Round up to multiple of 16
+    add     edi, 16
 
     call    malloc
 
@@ -405,7 +407,12 @@ process_horizontal_batch:
     cvtps2dq    xmm1, xmm8
     cvtps2dq    xmm2, xmm9
 
-    call    compressd2b_and_write12
+    packusdw    xmm0, xmm1                  ; Pack dwords to words
+    packusdw    xmm2, xmm15
+
+    packuswb    xmm0, xmm2                  ; Pack words to bytes
+
+    movdqu  [rdi], xmm0
 
     ret
 
@@ -571,119 +578,11 @@ process_vertical_batch:
     cvtps2dq    xmm2, xmm9
     cvtps2dq    xmm3, xmm10
 
-    call    compressd2b_and_write16
+    packusdw    xmm0, xmm1                  ; Pack dwords to words
+    packusdw    xmm2, xmm3
 
-    ret
+    packuswb    xmm0, xmm2                  ; Pack words to bytes
 
-; Compress 12 dwords stored in xmm0:xmm1:xmm2 to bytes and write to address in rdi
-; Params:
-;     rdi: address to which data should be written
-;     xmm0(packed single precision): dwords 0-3
-;     xmm1(packed single precision): dwords 4-7
-;     xmm2(packed single precision): dwords 8-11
-; Return:
-;     -
-compressd2b_and_write12:
-    pextrb  eax, xmm0, 0
-    pinsrb  xmm3, eax, 0
-
-    pextrb  eax, xmm0, 4
-    pinsrb  xmm3, eax, 1
-
-    pextrb  eax, xmm0, 8
-    pinsrb  xmm3, eax, 2
-
-    pextrb  eax, xmm0, 12
-    pinsrb  xmm3, eax, 3
-
-    pextrb  eax, xmm1, 0
-    pinsrb  xmm3, eax, 4
-
-    pextrb  eax, xmm1, 4
-    pinsrb  xmm3, eax, 5
-
-    pextrb  eax, xmm1, 8
-    pinsrb  xmm3, eax, 6
-
-    pextrb  eax, xmm1, 12
-    pinsrb  xmm3, eax, 7
-
-    pextrb  eax, xmm2, 0
-    pinsrb  xmm3, eax, 8
-
-    pextrb  eax, xmm2, 4
-    pinsrb  xmm3, eax, 9
-
-    pextrb  eax, xmm2, 8
-    pinsrb  xmm3, eax, 10
-
-    pextrb  eax, xmm2, 12
-    pinsrb  xmm3, eax, 11
-
-    movq    qword [rdi], xmm3
-    psrldq  xmm3, 8
-    movd    dword [rdi + 8], xmm3
-
-    ret
-
-; Compress 16 dwords stored in xmm0:xmm1:xmm2:xmm3 to bytes and write to address in rdi
-; Params:
-;     rdi: address to which data should be written
-;     xmm0(packed single precision): dwords 0-3
-;     xmm1(packed single precision): dwords 4-7
-;     xmm2(packed single precision): dwords 8-11
-;     xmm3(packed single precision): dwords 12-15
-; Return:
-;     -
-compressd2b_and_write16:
-    pextrb  eax, xmm0, 0
-    pinsrb  xmm4, eax, 0
-
-    pextrb  eax, xmm0, 4
-    pinsrb  xmm4, eax, 1
-
-    pextrb  eax, xmm0, 8
-    pinsrb  xmm4, eax, 2
-
-    pextrb  eax, xmm0, 12
-    pinsrb  xmm4, eax, 3
-
-    pextrb  eax, xmm1, 0
-    pinsrb  xmm4, eax, 4
-
-    pextrb  eax, xmm1, 4
-    pinsrb  xmm4, eax, 5
-
-    pextrb  eax, xmm1, 8
-    pinsrb  xmm4, eax, 6
-
-    pextrb  eax, xmm1, 12
-    pinsrb  xmm4, eax, 7
-
-    pextrb  eax, xmm2, 0
-    pinsrb  xmm4, eax, 8
-
-    pextrb  eax, xmm2, 4
-    pinsrb  xmm4, eax, 9
-
-    pextrb  eax, xmm2, 8
-    pinsrb  xmm4, eax, 10
-
-    pextrb  eax, xmm2, 12
-    pinsrb  xmm4, eax, 11
-
-    pextrb  eax, xmm3, 0
-    pinsrb  xmm4, eax, 12
-
-    pextrb  eax, xmm3, 4
-    pinsrb  xmm4, eax, 13
-
-    pextrb  eax, xmm3, 8
-    pinsrb  xmm4, eax, 14
-
-    pextrb  eax, xmm3, 12
-    pinsrb  xmm4, eax, 15
-
-    movdqu  [rdi], xmm4
+    movdqu  [rdi], xmm0
 
     ret

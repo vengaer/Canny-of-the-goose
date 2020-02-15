@@ -358,49 +358,12 @@ sobel:
     cvtps2dq    xmm2, xmm2
     cvtps2dq    xmm3, xmm3
 
-    pextrb  r15d, xmm0, 0
-    pinsrb  xmm4, r15d, 0
+    packusdw    xmm0, xmm1                  ; dwords to words
+    packusdw    xmm2, xmm3
 
-    pextrb  r15d, xmm0, 4
-    pinsrb  xmm4, r15d, 1
+    packuswb    xmm0, xmm2                  ; words to bytes
 
-    pextrb  r15d, xmm0, 8
-    pinsrb  xmm4, r15d, 2
-
-    pextrb  r15d, xmm0, 12
-    pinsrb  xmm4, r15d, 3
-
-    pextrb  r15d, xmm1, 0
-    pinsrb  xmm4, r15d, 4
-
-    pextrb  r15d, xmm1, 4
-    pinsrb  xmm4, r15d, 5
-
-    pextrb  r15d, xmm1, 8
-    pinsrb  xmm4, r15d, 6
-
-    pextrb  r15d, xmm1, 12
-    pinsrb  xmm4, r15d, 7
-
-    pextrb  r15d, xmm2, 0
-    pinsrb  xmm4, r15d, 8
-
-    pextrb  r15d, xmm2, 4
-    pinsrb  xmm4, r15d, 9
-
-    pextrb  r15d, xmm2, 8
-    pinsrb  xmm4, r15d, 10
-
-    pextrb  r15d, xmm2, 12
-    pinsrb  xmm4, r15d, 11
-
-    pextrb  r15d, xmm3, 0
-    pinsrb  xmm4, r15d, 12
-
-    pextrb  r15d, xmm3, 4
-    pinsrb  xmm4, r15d, 13
-
-    movdqu  [r13 + rax + 1], xmm4           ; Write bytes
+    movdqu  [r13 + rax + 1], xmm0           ; Write bytes
 
     add     eax, 14                         ; 14 values processesed per iteration
     cmp     eax, ebx
